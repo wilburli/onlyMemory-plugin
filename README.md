@@ -9,6 +9,7 @@
 ## 目录
 
 - [特性](#特性)
+- [从零安装（新人必看）](#从零安装新人必看)
 - [快速开始](#快速开始)
 - [架构概览](#架构概览)
 - [模块详解](#模块详解)
@@ -28,6 +29,125 @@
 - **MCP 标准协议** — 通过 `@deepseek-ai/dsh-mcp-client` 与 Harness 无缝集成
 - **模块化设计** — 每个子模块可独立替换和扩展
 - **导入导出** — JSON 格式，支持跨机器迁移
+
+---
+
+## 从零安装（新人必看）
+
+以下流程假设你刚拿到一份源码，手把手带你走完从下载到运行的全过程。
+
+### 第 1 步：环境准备
+
+确保你的机器上已安装：
+
+| 工具 | 版本要求 | 检查命令 |
+|------|----------|----------|
+| Node.js | >= 18 | `node -v` |
+| pnpm | >= 8 | `pnpm -v` |
+| DeepSeek Harness | 最新版 | 参考 [Harness 安装文档](https://deepseek-harness.github.io/deepseek-harness/develop/basic/) |
+
+> Harness 是 DeepSeek 的 Agent 运行时，OnlyMemory 作为插件运行在它之上。
+> 如果你还没有安装 Harness，请先完成 Harness 的安装再继续。
+
+### 第 2 步：获取源码
+
+```bash
+# 方式一：Git 克隆
+git clone <仓库地址>
+cd onlyMemory-plugin
+
+# 方式二：直接下载 ZIP 并解压
+cd onlyMemory-plugin
+```
+
+### 第 3 步：安装依赖 + 编译
+
+```bash
+npm install        # 安装 sql.js、@modelcontextprotocol/sdk 等依赖
+npm run build      # 编译 TypeScript → dist/
+```
+
+编译成功后会看到 `dist/` 目录下生成 `.js` + `.d.ts` 文件。
+
+### 第 4 步：验证编译结果
+
+```bash
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | node bin/only-memory.mjs
+```
+
+如果看到如下 JSON 响应，说明编译成功：
+```json
+{"result":{"serverInfo":{"name":"only-memory","version":"0.1.0"},...},"jsonrpc":"2.0","id":1}
+```
+
+### 第 5 步：安装到 Harness
+
+```bash
+# 进入 Harness 安装目录
+cd /path/to/deepseek-harness
+
+# 安装插件到 web profile
+dsh plugin --profile web add /path/to/onlyMemory-plugin
+```
+
+> **报 `ERR_PNPM_ADDING_TO_ROOT`？**
+> 这是因为 pnpm 的 workspace 保护机制，需要在 profile 目录创建 `.npmrc` 解除限制：
+>
+> **Windows (PowerShell):**
+> ```powershell
+> echo "ignore-workspace-root-check=true" > $env:USERPROFILE\.dsh\profiles\web\.npmrc
+> ```
+>
+> **macOS / Linux:**
+> ```bash
+> echo "ignore-workspace-root-check=true" > ~/.dsh/profiles/web/.npmrc
+> ```
+>
+> 然后重新执行 `dsh plugin --profile web add` 命令。
+
+### 第 6 步：启动 Harness
+
+```bash
+dsh web
+```
+
+> 如果报 `EADDRINUSE`（端口被占用），换一个端口：
+> ```bash
+> dsh web --port 3081
+> ```
+>
+> 启动成功后浏览器会自动打开 Harness Web UI（默认 http://127.0.0.1:3080）。
+
+### 第 7 步：验证插件生效
+
+在 Harness 对话中输入：
+
+```
+请记住我的验证代号是 lapsang-42
+```
+
+然后**开一个新会话**，问：
+
+```
+我的验证代号是什么？查一下记忆
+```
+
+如果模型调用了 `mcp__only_memory__search` 并返回 `lapsang-42`，说明插件安装成功！
+
+### 第 8 步：验证安装状态（可选）
+
+```bash
+# 查看配置树，确认 only-memory 在 bundle 列表中
+dsh --profile web --dump-config
+```
+
+在输出中搜索 `only_memory`，应该能看到 MCP 客户端配置。
+
+### 卸载
+
+```bash
+dsh plugin --profile web remove only-memory
+```
 
 ---
 
@@ -490,7 +610,7 @@ engine.close();
 | `ERR_PNPM_ADDING_TO_ROOT` | pnpm workspace 拒绝向 root 添加依赖 | 创建 `.npmrc` 加 `ignore-workspace-root-check=true` |
 | `__dirname is not defined` | Harness `!!js` 上下文无此变量 | 已修复，使用 `process.getBuiltinModule` 动态定位 |
 | `EADDRINUSE 3080` | 端口被占用 | `dsh web --port 3081` |
-| MCP 工具未出现 | 插件未加载 | 检查 `dsh --profile web --dump-config` 输出中是否有 `memory-deepseek` |
+| `memory-onlymemory` 未出现在配置中 | 插件未正确安装 | 重新执行 `dsh plugin --profile web add /path/to/onlyMemory-plugin` |
 | 记忆为空 | 未触发存储 | 需先进行对话让模型调用 `remember` 工具 |
 
 ---
