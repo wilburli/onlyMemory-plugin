@@ -1,0 +1,18 @@
+# OnlyMemory - Harness 配置
+#
+# 方式一：dsh plugin add（推荐，永久生效）
+#   dsh plugin --profile <name> add ./path/to/onlyMemory-plugin
+#
+# 方式二：--patch（临时生效）
+#   dsh web --patch "E:/ljq/ai/memoryPlusDeepseek/onlyMemory-plugin/cordis-patch.yml"
+
+- insert:
+    - id: memory-onlymemory
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: only_memory
+        transport: stdio
+        command: node
+        args:
+          - 'E:/ljq/ai/memoryPlusDeepseek/onlyMemory-plugin/bin/only-memory.mjs'
+        cwd: 'E:/ljq/ai/memoryPlusDeepseek/onlyMemory-plugin'

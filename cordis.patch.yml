@@ -1,0 +1,21 @@
+# only-memory bundle patch
+# Installed via: dsh plugin --profile <name> add ./path/to/onlyMemory-plugin
+#
+# Registers the OnlyMemory MCP server through dsh-mcp-client.
+# The server is launched as a child process and exposes 7 tools:
+#   remember, forget, search, stats, list_memories, export_memories, import_memories
+#
+# Path resolution: uses the profiles/node_modules symlink maintained by dsh
+# on every launch (healProfilesModuleFallback), with realpathSync to follow
+# the symlink to the actual package directory.
+
+- insert:
+    - id: memory-onlymemory
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: only_memory
+        transport: stdio
+        command: node
+        args:
+          - !!js "(() => { const p = process.getBuiltinModule('node:path'); const fs = process.getBuiltinModule('node:fs'); const home = process.env.DSH_HOME || p.join(process.env.USERPROFILE || process.env.HOME, '.dsh'); const linkDir = p.join(home, 'profiles', 'node_modules', 'only-memory'); const pkgDir = fs.existsSync(linkDir) ? fs.realpathSync(linkDir) : p.join(home, 'profiles', 'web', 'node_modules', 'only-memory'); return p.join(pkgDir, 'bin', 'only-memory.mjs'); })()"
+        cwd: !!js "(() => { const p = process.getBuiltinModule('node:path'); const fs = process.getBuiltinModule('node:fs'); const home = process.env.DSH_HOME || p.join(process.env.USERPROFILE || process.env.HOME, '.dsh'); const linkDir = p.join(home, 'profiles', 'node_modules', 'only-memory'); return fs.existsSync(linkDir) ? fs.realpathSync(linkDir) : p.join(home, 'profiles', 'web', 'node_modules', 'only-memory'); })()"
