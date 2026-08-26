@@ -5,8 +5,8 @@
  * 可独立使用，也可通过 Cordis 插件入口集成到 Harness。
  */
 
-import type { Memory, SessionSummary, RetrievalResult, CreateMemoryInput } from './models.js';
-import { MemoryType, MemoryStatus, createMemory, generateId } from './models.js';
+import type { Memory, SessionSummary, RetrievalResult, CreateMemoryInput, MemoryRelation } from './models.js';
+import { MemoryType, MemoryStatus, createMemory, generateId, RelationType } from './models.js';
 import type { MemoryPluginConfig } from './config.js';
 import { resolveConfig, ensureDirs, getDbPath, getSessionDir } from './config.js';
 import { SqliteStore } from './storage/sqlite-store.js';
@@ -195,13 +195,31 @@ export class MemoryEngine {
     return this.store.getAllActive();
   }
 
+  /** 按会话过滤记忆 */
+  getMemoriesBySession(sessionId: string): Memory[] {
+    this.ensureInitialized();
+    return this.store.getBySession(sessionId);
+  }
+
+  /** 获取所有会话 ID 列表 */
+  getSessionIds(): string[] {
+    this.ensureInitialized();
+    return this.store.getSessionIds();
+  }
+
+  /** 获取当前活跃会话 ID（无会话时返回 null） */
+  getCurrentSessionId(): string | null {
+    return this.currentSessionId;
+  }
+
   /** 获取统计信息 */
-  getStats(): { active: number; dbPath: string; projectId: string } {
+  getStats(): { active: number; dbPath: string; projectId: string; currentSession: string | null } {
     this.ensureInitialized();
     return {
       active: this.store.getActiveCount(),
       dbPath: getDbPath(this.config),
       projectId: this.config.projectId,
+      currentSession: this.currentSessionId,
     };
   }
 
@@ -287,6 +305,103 @@ export class MemoryEngine {
     if (this.currentSessionId) this.endSession();
     this.store?.close();
     this.initialized = false;
+  }
+
+  // ================================================================ //
+  // 标签管理
+  // ================================================================ //
+
+  /** 给记忆添加标签 */
+  addTag(memoryId: string, tag: string): boolean {
+    this.ensureInitialized();
+    return this.store.addTag(memoryId, tag);
+  }
+
+  /** 移除标签 */
+  removeTag(memoryId: string, tag: string): boolean {
+    this.ensureInitialized();
+    return this.store.removeTag(memoryId, tag);
+  }
+
+  /** 获取一条记忆的所有标签 */
+  getTagsForMemory(memoryId: string): string[] {
+    this.ensureInitialized();
+    return this.store.getTagsForMemory(memoryId);
+  }
+
+  /** 获取所有已使用的标签 */
+  getAllTags(): string[] {
+    this.ensureInitialized();
+    return this.store.getAllTags();
+  }
+
+  /** 按标签过滤记忆（带写入标签字段） */
+  filterByTag(tag: string): Memory[] {
+    this.ensureInitialized();
+    const ids = this.store.findMemoryIdsByTag(tag);
+    if (ids.length === 0) return [];
+    const tagsMap = this.store.getTagsForMemories(ids);
+    const result: Memory[] = [];
+    for (const id of ids) {
+      const mem = this.store.getMemory(id);
+      if (mem) result.push({ ...mem, tags: tagsMap.get(id) ?? [] });
+    }
+    return result;
+  }
+
+  /** 获取所有记忆（带标签字段） */
+  getAllMemoriesWithTags(): Memory[] {
+    this.ensureInitialized();
+    const memories = this.store.getAllActive();
+    if (memories.length === 0) return memories;
+    const ids = memories.map((m) => m.id);
+    const tagsMap = this.store.getTagsForMemories(ids);
+    return memories.map((m) => ({ ...m, tags: tagsMap.get(m.id) ?? [] }));
+  }
+
+  /** 将一组记忆补充标签字段 */
+  attachTagsToMemories(memories: Memory[]): Memory[] {
+    if (memories.length === 0) return memories;
+    const ids = memories.map((m) => m.id);
+    const tagsMap = this.store.getTagsForMemories(ids);
+    return memories.map((m) => ({ ...m, tags: tagsMap.get(m.id) ?? [] }));
+  }
+
+  // ================================================================ //
+  // 关系管理
+  // ================================================================ //
+
+  /** 建立两条记忆的关系 */
+  linkMemories(
+    fromId: string,
+    toId: string,
+    relationType: RelationType,
+    note: string = '',
+    confidence: number = 1.0,
+  ): MemoryRelation | null {
+    this.ensureInitialized();
+    return this.store.linkMemories(fromId, toId, relationType, note, confidence);
+  }
+
+  /** 获取一条记忆的所有关联关系（带关联记忆内容） */
+  getLinksForMemory(memoryId: string): Array<MemoryRelation & { fromContent: string; toContent: string }> {
+    this.ensureInitialized();
+    const relations = this.store.getRelationsForMemory(memoryId);
+    return relations.map((rel) => {
+      const from = this.store.getMemory(rel.fromId);
+      const to   = this.store.getMemory(rel.toId);
+      return {
+        ...rel,
+        fromContent: from?.content ?? '(deleted)',
+        toContent:   to?.content   ?? '(deleted)',
+      };
+    });
+  }
+
+  /** 移除两条记忆间的关系 */
+  unlinkMemories(fromId: string, toId: string, relationType?: RelationType): number {
+    this.ensureInitialized();
+    return this.store.unlinkMemories(fromId, toId, relationType);
   }
 
   // ================================================================ //

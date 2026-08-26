@@ -8,7 +8,8 @@
 import initSqlJs, { type Database } from 'sql.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { Memory, MemoryStatus, SessionSummary } from '../models.js';
+import type { Memory, MemoryStatus, SessionSummary, MemoryTag, MemoryRelation } from '../models.js';
+import { RelationType, generateId } from '../models.js';
 
 /** SQL 初始化脚本 */
 const INIT_SQL = `
@@ -37,11 +38,24 @@ CREATE TABLE IF NOT EXISTS memory_relations (
   from_id     TEXT NOT NULL,
   to_id       TEXT NOT NULL,
   relation_type TEXT NOT NULL,
+  note        TEXT DEFAULT '',
   confidence  REAL DEFAULT 1.0,
   created_at  TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (from_id) REFERENCES memories(id),
   FOREIGN KEY (to_id) REFERENCES memories(id)
 );
+
+CREATE TABLE IF NOT EXISTS memory_tags (
+  memory_id   TEXT NOT NULL,
+  tag         TEXT NOT NULL,
+  created_at  TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (memory_id, tag),
+  FOREIGN KEY (memory_id) REFERENCES memories(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_memory_tags_tag ON memory_tags(tag);
+CREATE INDEX IF NOT EXISTS idx_memory_relations_from ON memory_relations(from_id);
+CREATE INDEX IF NOT EXISTS idx_memory_relations_to ON memory_relations(to_id);
 
 CREATE TABLE IF NOT EXISTS session_logs (
   session_id   TEXT PRIMARY KEY,
@@ -85,6 +99,8 @@ export class SqliteStore {
 
     // 兼容旧数据库：添加 pinned 列（已存在则忽略错误）
     try { this.db.run('ALTER TABLE memories ADD COLUMN pinned INTEGER DEFAULT 0'); } catch { /* 列已存在 */ }
+    // 兼容旧数据库：memory_relations 添加 note 列
+    try { this.db.run("ALTER TABLE memory_relations ADD COLUMN note TEXT DEFAULT ''"); } catch { /* 列已存在 */ }
 
     this.save();
   }
@@ -274,6 +290,27 @@ export class SqliteStore {
     return rowToMemory(results[0].columns, results[0].values[0]);
   }
 
+  /** 按会话 ID 获取属于该会话的活跃记忆 */
+  getBySession(sessionId: string): Memory[] {
+    if (!this.db) return [];
+    const results = this.db.exec(
+      "SELECT * FROM memories WHERE status = 'active' AND source_session = ? ORDER BY created_at DESC",
+      [sessionId],
+    );
+    if (results.length === 0) return [];
+    return results[0].values.map((row: unknown[]) => rowToMemory(results[0].columns, row));
+  }
+
+  /** 获取所有不同会话的 ID（用于展示历史会话列表） */
+  getSessionIds(): string[] {
+    if (!this.db) return [];
+    const results = this.db.exec(
+      "SELECT DISTINCT source_session FROM memories WHERE status = 'active' AND source_session IS NOT NULL ORDER BY source_session DESC",
+    );
+    if (results.length === 0) return [];
+    return results[0].values.map((row: unknown[]) => row[0] as string);
+  }
+
   /** 获取活跃记忆数量 */
   getActiveCount(): number {
     if (!this.db) return 0;
@@ -355,6 +392,181 @@ export class SqliteStore {
       [session.sessionId, session.summary, session.endTime, session.memoryCount],
     );
     this.markDirty();
+  }
+
+  // ================================================================ //
+  // 标签管理
+  // ================================================================ //
+
+  /** 给记忆添加标签 */
+  addTag(memoryId: string, tag: string): boolean {
+    if (!this.db) return false;
+    const norm = tag.trim().toLowerCase();
+    if (!norm) return false;
+    try {
+      this.db.run(
+        `INSERT OR IGNORE INTO memory_tags (memory_id, tag, created_at)
+         VALUES (?, ?, datetime('now'))`,
+        [memoryId, norm],
+      );
+      const changed = this.db.getRowsModified() > 0;
+      if (changed) this.markDirty();
+      return changed;
+    } catch {
+      return false;
+    }
+  }
+
+  /** 移除标签 */
+  removeTag(memoryId: string, tag: string): boolean {
+    if (!this.db) return false;
+    const norm = tag.trim().toLowerCase();
+    this.db.run('DELETE FROM memory_tags WHERE memory_id = ? AND tag = ?', [memoryId, norm]);
+    const changed = this.db.getRowsModified() > 0;
+    if (changed) this.markDirty();
+    return changed;
+  }
+
+  /** 获取一条记忆的所有标签 */
+  getTagsForMemory(memoryId: string): string[] {
+    if (!this.db) return [];
+    const results = this.db.exec(
+      'SELECT tag FROM memory_tags WHERE memory_id = ? ORDER BY tag',
+      [memoryId],
+    );
+    if (results.length === 0) return [];
+    return results[0].values.map((row: unknown[]) => row[0] as string);
+  }
+
+  /** 按标签查找记忆 ID */
+  findMemoryIdsByTag(tag: string): string[] {
+    if (!this.db) return [];
+    const norm = tag.trim().toLowerCase();
+    const results = this.db.exec(
+      "SELECT mt.memory_id FROM memory_tags mt JOIN memories m ON m.id = mt.memory_id WHERE mt.tag = ? AND m.status = 'active'",
+      [norm],
+    );
+    if (results.length === 0) return [];
+    return results[0].values.map((row: unknown[]) => row[0] as string);
+  }
+
+  /** 获取所有已使用的标签（去重排序） */
+  getAllTags(): string[] {
+    if (!this.db) return [];
+    const results = this.db.exec(
+      "SELECT DISTINCT mt.tag FROM memory_tags mt JOIN memories m ON m.id = mt.memory_id WHERE m.status = 'active' ORDER BY mt.tag",
+    );
+    if (results.length === 0) return [];
+    return results[0].values.map((row: unknown[]) => row[0] as string);
+  }
+
+  /** 批量获取多条记忆的标签（返回 Map） */
+  getTagsForMemories(ids: string[]): Map<string, string[]> {
+    const result = new Map<string, string[]>();
+    if (!this.db || ids.length === 0) return result;
+    const placeholders = ids.map(() => '?').join(',');
+    const res = this.db.exec(
+      `SELECT memory_id, tag FROM memory_tags WHERE memory_id IN (${placeholders}) ORDER BY tag`,
+      ids,
+    );
+    if (res.length === 0) return result;
+    for (const [memId, tag] of res[0].values as [string, string][]) {
+      if (!result.has(memId)) result.set(memId, []);
+      result.get(memId)!.push(tag);
+    }
+    return result;
+  }
+
+  /** 删除记忆时同步清除其标签 */
+  deleteTagsForMemory(memoryId: string): void {
+    if (!this.db) return;
+    this.db.run('DELETE FROM memory_tags WHERE memory_id = ?', [memoryId]);
+    this.markDirty();
+  }
+
+  // ================================================================ //
+  // 关系管理
+  // ================================================================ //
+
+  /** 建立两条记忆的关系 */
+  linkMemories(
+    fromId: string,
+    toId: string,
+    relationType: RelationType,
+    note: string = '',
+    confidence: number = 1.0,
+  ): MemoryRelation | null {
+    if (!this.db) return null;
+    // 检查两条记忆均存在
+    const fromOk = this.db.exec("SELECT id FROM memories WHERE id = ? AND status = 'active'", [fromId]);
+    const toOk   = this.db.exec("SELECT id FROM memories WHERE id = ? AND status = 'active'", [toId]);
+    if (!fromOk.length || !fromOk[0].values.length) return null;
+    if (!toOk.length   || !toOk[0].values.length)   return null;
+
+    // 如果相同方向已有相同类型的关系，更新而非重复插入
+    const existing = this.db.exec(
+      'SELECT id FROM memory_relations WHERE from_id = ? AND to_id = ? AND relation_type = ?',
+      [fromId, toId, relationType],
+    );
+    const now = new Date().toISOString();
+    let relId: string;
+    if (existing.length && existing[0].values.length) {
+      relId = existing[0].values[0][0] as string;
+      this.db.run(
+        'UPDATE memory_relations SET note = ?, confidence = ? WHERE id = ?',
+        [note, confidence, relId],
+      );
+    } else {
+      relId = generateId();
+      this.db.run(
+        `INSERT INTO memory_relations (id, from_id, to_id, relation_type, note, confidence, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [relId, fromId, toId, relationType, note, confidence, now],
+      );
+    }
+    this.markDirty();
+    return { id: relId, fromId, toId, relationType, note, confidence, createdAt: now };
+  }
+
+  /** 获取一条记忆的所有关联关系（双向） */
+  getRelationsForMemory(memoryId: string): MemoryRelation[] {
+    if (!this.db) return [];
+    const results = this.db.exec(
+      `SELECT id, from_id, to_id, relation_type, note, confidence, created_at
+       FROM memory_relations
+       WHERE from_id = ? OR to_id = ?
+       ORDER BY created_at DESC`,
+      [memoryId, memoryId],
+    );
+    if (!results.length) return [];
+    return results[0].values.map((row: unknown[]) => ({
+      id:           row[0] as string,
+      fromId:       row[1] as string,
+      toId:         row[2] as string,
+      relationType: row[3] as RelationType,
+      note:         row[4] as string,
+      confidence:   row[5] as number,
+      createdAt:    row[6] as string,
+    }));
+  }
+
+  /** 移除关系 */
+  unlinkMemories(fromId: string, toId: string, relationType?: RelationType): number {
+    if (!this.db) return 0;
+    if (relationType) {
+      this.db.run(
+        'DELETE FROM memory_relations WHERE from_id = ? AND to_id = ? AND relation_type = ?',
+        [fromId, toId, relationType],
+      );
+    } else {
+      this.db.run(
+        'DELETE FROM memory_relations WHERE (from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?)',
+        [fromId, toId, toId, fromId],
+      );
+    }
+    const changed = this.db.getRowsModified();
+    if (changed > 0) this.markDirty();
+    return changed;
   }
 
   // ================================================================ //

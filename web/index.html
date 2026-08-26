@@ -99,6 +99,29 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica N
 /* Footer */
 .footer{text-align:center;padding:20px;color:#bbb;font-size:12px}
 
+/* Tags */
+.tag-chip{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;background:#e8f5e9;color:#2e7d32;border-radius:12px;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s;border:1px solid #a5d6a7}
+.tag-chip:hover{background:#c8e6c9}
+.tag-chip .remove-tag{font-size:10px;opacity:.6;cursor:pointer;padding:0 1px}
+.tag-chip .remove-tag:hover{opacity:1;color:#c62828}
+.tags-row{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
+.tag-add-btn{padding:2px 8px;border:1px dashed #a5d6a7;border-radius:12px;font-size:11px;color:#4caf50;background:transparent;cursor:pointer}
+.tag-add-btn:hover{background:#e8f5e9}
+.tag-filter-bar{max-width:1200px;margin:0 24px;padding:8px 0 0;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.tag-filter-bar .label{font-size:12px;color:#9e9e9e;margin-right:4px}
+.tag-filter-chip{padding:4px 12px;border:2px solid #a5d6a7;border-radius:12px;background:#fff;cursor:pointer;font-size:12px;transition:all .2s;color:#2e7d32}
+.tag-filter-chip.active{background:#4caf50;color:#fff;border-color:#4caf50}
+.tag-filter-chip:hover:not(.active){background:#e8f5e9}
+
+/* Relations badge */
+.relation-badge{display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:600;border:1px solid}
+.rel-contradicts{background:#fce4ec;color:#c62828;border-color:#ef9a9a}
+.rel-supports{background:#e8f5e9;color:#2e7d32;border-color:#a5d6a7}
+.rel-updates{background:#e3f2fd;color:#1565c0;border-color:#90caf9}
+.rel-relates{background:#f3e5f5;color:#7b1fa2;border-color:#ce93d8}
+.action-btn.link{color:#7b1fa2;border-color:#ce93d8}
+.action-btn.link:hover{background:#f3e5f5}
+
 /* Responsive */
 @media(max-width:640px){
   .cards{grid-template-columns:1fr}
@@ -106,7 +129,20 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica N
   .toolbar{flex-direction:column}
   .search-box{width:100%}
   .filter-group{width:100%;overflow-x:auto}
+  .scope-bar{flex-direction:column;gap:8px}
 }
+
+/* Scope Bar */
+.scope-bar{max-width:1200px;margin:12px auto 0;padding:0 24px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.scope-label{font-size:12px;color:#9e9e9e;font-weight:600;white-space:nowrap}
+.scope-btn{padding:5px 14px;border:2px solid #e0e0e0;border-radius:20px;background:#fff;cursor:pointer;font-size:12px;font-weight:500;transition:all .2s;color:#555;white-space:nowrap}
+.scope-btn:hover{border-color:#90caf9;background:#e3f2fd;color:#1565c0}
+.scope-btn.active{border-color:#1976d2;background:#1976d2;color:#fff}
+.scope-sep{color:#ddd;font-size:18px;line-height:1;user-select:none}
+.scope-session-select{padding:4px 10px;border:2px solid #e0e0e0;border-radius:20px;font-size:12px;outline:none;cursor:pointer;background:#fff;color:#555;transition:border-color .2s;display:none}
+.scope-session-select:focus{border-color:#1976d2}
+.scope-workspace-badge{display:inline-flex;align-items:center;gap:3px;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:700;background:#e3f2fd;color:#1565c0;border:1px solid #90caf9;letter-spacing:.2px}
+.scope-hint{font-size:11px;color:#bdbdbd;margin-left:4px}
 </style>
 </head>
 <body>
@@ -122,6 +158,17 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica N
   </div>
 </header>
 
+<!-- Scope Switcher -->
+<div class="scope-bar" id="scopeBar">
+  <span class="scope-label">📂 范围:</span>
+  <button class="scope-btn active" data-scope="workspace" id="scopeBtnWorkspace">🗂 工作区</button>
+  <button class="scope-btn" data-scope="session" id="scopeBtnSession">💬 当前会话</button>
+  <button class="scope-btn" data-scope="all" id="scopeBtnAll">🌐 全部工作区</button>
+  <span class="scope-sep">|</span>
+  <select id="sessionSelect" class="scope-session-select" title="选择历史会话"></select>
+  <span class="scope-hint" id="scopeHint"></span>
+</div>
+
 <div class="toolbar">
   <div class="search-box"><input type="text" id="searchInput" placeholder="搜索记忆..."></div>
   <div class="filter-group">
@@ -136,6 +183,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica N
 </div>
 
 <main class="content">
+  <div id="tagFilterBar" class="tag-filter-bar" style="display:none"></div>
   <div id="cardsContainer" class="cards"><div class="loading">加载中...</div></div>
 </main>
 
@@ -182,6 +230,56 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica N
   </div>
 </div>
 
+<!-- Tag Add Modal -->
+<div id="tagModal" class="modal-overlay hidden">
+  <div class="modal">
+    <h2>添加标签</h2>
+    <p id="tagModalMemory" style="margin-bottom:12px;font-size:13px;color:#555;padding:10px;background:#f5f5f5;border-radius:8px"></p>
+    <input type="hidden" id="tagMemoryId">
+    <div class="form-group">
+      <label>标签名称</label>
+      <input type="text" id="tagInput" placeholder="work / personal / important...">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="btnCancelTag">取消</button>
+      <button class="btn-save" id="btnSaveTag">添加</button>
+    </div>
+  </div>
+</div>
+
+<!-- Links Modal -->
+<div id="linksModal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:640px">
+    <h2>记忆关系</h2>
+    <p id="linksModalMemory" style="margin-bottom:12px;font-size:13px;color:#555;padding:10px;background:#f5f5f5;border-radius:8px"></p>
+    <input type="hidden" id="linksMemoryId">
+    <div id="linksListContainer" style="margin-bottom:16px;min-height:60px"></div>
+    <hr style="margin:16px 0;border:none;border-top:1px solid #eee">
+    <h3 style="font-size:15px;margin-bottom:12px">新建关系</h3>
+    <div class="form-group">
+      <label>Target 记忆 ID</label>
+      <input type="text" id="linkToId" placeholder="输入目标记忆 ID">
+    </div>
+    <div class="form-group">
+      <label>关系类型</label>
+      <select id="linkType">
+        <option value="relates">🔗 Relates （一般关联）</option>
+        <option value="supports">✅ Supports （支持佐证）</option>
+        <option value="contradicts">❌ Contradicts （矛盾冲突）</option>
+        <option value="updates">🔄 Updates （更新覆盖）</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>备注（可选）</label>
+      <input type="text" id="linkNote" placeholder="说明关系原因...">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="btnCancelLinks">关闭</button>
+      <button class="btn-save" id="btnCreateLink">建立关系</button>
+    </div>
+  </div>
+</div>
+
 <footer class="footer">OnlyMemory v0.1.0 &mdash; Long-term memory for LLMs</footer>
 
 <script>
@@ -189,6 +287,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica N
 let memories = [];
 let currentSearch = '';
 let currentType = 'all';
+let currentTag = null;   // null = 不按标签筛选
+let currentScope = 'workspace'; // 'workspace' | 'session' | 'all'
+let currentSessionId = null;    // null = 使用活跃会话
 let searchTimer = null;
 
 // ===== API helpers =====
@@ -204,14 +305,25 @@ async function api(path, opts = {}) {
 
 // ===== Data loading =====
 async function loadMemories() {
-  let path = '/memories?limit=100';
-  if (currentType === 'pinned') path += '&type=all';
-  else if (currentType !== 'all') path += '&type=' + currentType;
-  if (currentSearch) path += '&search=' + encodeURIComponent(currentSearch);
-  const data = await api(path);
-  memories = data.memories || [];
+  if (currentTag) {
+    // 标签筛选模式：直接请求标签 API
+    const data = await api('/tags/' + encodeURIComponent(currentTag));
+    memories = data.memories || [];
+  } else {
+    let path = '/memories?limit=200&scope=' + currentScope;
+    if (currentScope === 'session' && currentSessionId) {
+      path += '&sessionId=' + encodeURIComponent(currentSessionId);
+    }
+    if (currentType === 'pinned') path += '&type=all';
+    else if (currentType !== 'all') path += '&type=' + currentType;
+    if (currentSearch && currentScope !== 'all') path += '&search=' + encodeURIComponent(currentSearch);
+    const data = await api(path);
+    memories = data.memories || [];
+  }
   renderMemories();
   await loadStats();
+  await loadTagFilterBar();
+  updateScopeHint();
 }
 
 async function loadStats() {
@@ -220,6 +332,94 @@ async function loadStats() {
   const all = await api('/memories?limit=999');
   document.getElementById('statPinned').textContent = (all.memories || []).filter(m => m.pinned).length;
   document.getElementById('statProject').textContent = s.project ?? s.projectId ?? '-';
+}
+
+async function loadTagFilterBar() {
+  const bar = document.getElementById('tagFilterBar');
+  // 全部工作区模式不支持标签筛选
+  if (currentScope === 'all') { bar.style.display = 'none'; return; }
+  const data = await api('/tags');
+  const tags = data.tags || [];
+  if (!tags.length) { bar.style.display = 'none'; return; }
+  bar.style.display = 'flex';
+  bar.innerHTML = '<span class="label">🏷️ 标签筛选:</span>';
+  // 全部 chip
+  const allChip = document.createElement('span');
+  allChip.className = 'tag-filter-chip' + (currentTag === null ? ' active' : '');
+  allChip.textContent = '全部';
+  allChip.addEventListener('click', () => { currentTag = null; loadMemories(); });
+  bar.appendChild(allChip);
+  tags.forEach(tag => {
+    const chip = document.createElement('span');
+    chip.className = 'tag-filter-chip' + (currentTag === tag ? ' active' : '');
+    chip.textContent = tag;
+    chip.addEventListener('click', () => { currentTag = tag; loadMemories(); });
+    bar.appendChild(chip);
+  });
+}
+
+// ===== Scope Bar =====
+async function initScopeBar() {
+  await refreshSessionSelect();
+  document.querySelectorAll('.scope-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      currentScope = btn.dataset.scope;
+      currentTag = null;
+      document.querySelectorAll('.scope-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const sel = document.getElementById('sessionSelect');
+      if (currentScope === 'session') {
+        sel.style.display = 'inline-block';
+        if (!currentSessionId && sel.options.length > 0) currentSessionId = sel.value || null;
+      } else {
+        sel.style.display = 'none';
+        currentSessionId = null;
+      }
+      loadMemories();
+    });
+  });
+  document.getElementById('sessionSelect').addEventListener('change', (e) => {
+    currentSessionId = e.target.value || null;
+    loadMemories();
+  });
+}
+
+async function refreshSessionSelect() {
+  const data = await api('/sessions');
+  const sel = document.getElementById('sessionSelect');
+  const sessions = data.sessionIds || [];
+  const activeSid = data.currentSession;
+  sel.innerHTML = '';
+  if (activeSid) {
+    const opt = document.createElement('option');
+    opt.value = activeSid;
+    opt.textContent = '🟢 当前会话 (' + activeSid.slice(0, 8) + ')';
+    sel.appendChild(opt);
+  }
+  sessions.filter(sid => sid !== activeSid).forEach(sid => {
+    const opt = document.createElement('option');
+    opt.value = sid;
+    let label = sid;
+    try {
+      const ts = parseInt(sid.split('-')[0], 36);
+      if (!isNaN(ts)) label = new Date(ts).toLocaleString('zh-CN', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+    } catch {}
+    opt.textContent = '📍 ' + label + ' (' + sid.slice(0, 8) + ')';
+    sel.appendChild(opt);
+  });
+  if (activeSid) sel.value = activeSid;
+}
+
+function updateScopeHint() {
+  const hint = document.getElementById('scopeHint');
+  if (currentScope === 'all') {
+    const workspaces = [...new Set(memories.map(m => m._workspace).filter(Boolean))];
+    hint.textContent = workspaces.length ? '共 ' + workspaces.length + ' 个工作区: ' + workspaces.join(', ') : '';
+  } else if (currentScope === 'session') {
+    hint.textContent = memories.length ? memories.length + ' 条记忆' : '该会话暂无记忆';
+  } else {
+    hint.textContent = '';
+  }
 }
 
 // ===== Rendering =====
@@ -255,6 +455,13 @@ function createCard(m) {
   badge.textContent = m.type;
   header.appendChild(badge);
   if (m.pinned) { const p = document.createElement('span'); p.className = 'pin-icon'; p.textContent = '📌'; header.appendChild(p); }
+  // 全部工作区模式展示来源工作区
+  if (m._workspace) {
+    const wb = document.createElement('span');
+    wb.className = 'scope-workspace-badge';
+    wb.textContent = '🗂 ' + m._workspace;
+    header.appendChild(wb);
+  }
   const impMini = document.createElement('span');
   impMini.className = 'importance-mini';
   impMini.textContent = pct + '%';
@@ -292,15 +499,46 @@ function createCard(m) {
   const editBtn = document.createElement('button');
   editBtn.className = 'action-btn edit';
   editBtn.textContent = '✏️ 编辑';
+  const linkBtn = document.createElement('button');
+  linkBtn.className = 'action-btn link';
+  linkBtn.textContent = '🔗 关系';
   const delBtn = document.createElement('button');
   delBtn.className = 'action-btn delete';
   delBtn.textContent = '🗑 删除';
-  actions.append(pinBtn, editBtn, delBtn);
+  actions.append(pinBtn, editBtn, linkBtn, delBtn);
 
-  card.append(header, content, meta, actions);
+  // Tags row
+  const tagsRow = document.createElement('div');
+  tagsRow.className = 'tags-row';
+  tagsRow.dataset.memId = m.id;
+  const renderTagsRow = (tags) => {
+    tagsRow.innerHTML = '';
+    (tags || []).forEach(tag => {
+      const chip = document.createElement('span');
+      chip.className = 'tag-chip';
+      chip.innerHTML = `🏷️ ${tag} <span class="remove-tag" title="移除标签">×</span>`;
+      chip.querySelector('.remove-tag').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await api('/untag/' + m.id, { method: 'POST', body: { tag } });
+        toast('已移除标签: ' + tag, 'info');
+        loadMemories();
+      });
+      chip.addEventListener('click', () => { currentTag = tag; loadMemories(); });
+      tagsRow.appendChild(chip);
+    });
+    const addBtn = document.createElement('button');
+    addBtn.className = 'tag-add-btn';
+    addBtn.textContent = '+ 添加标签';
+    addBtn.addEventListener('click', () => openTagModal(m));
+    tagsRow.appendChild(addBtn);
+  };
+  renderTagsRow(m.tags || []);
+
+  card.append(header, content, tagsRow, meta, actions);
 
   pinBtn.addEventListener('click', () => togglePin(m.id, m.pinned));
   editBtn.addEventListener('click', () => openEdit(m));
+  linkBtn.addEventListener('click', () => openLinksModal(m));
   delBtn.addEventListener('click', () => openDelete(m));
 
   return card;
@@ -337,6 +575,87 @@ function showToast(msg, type) {
 }
 // alias
 const toast = showToast;
+
+// ===== Tag Modal =====
+function openTagModal(m) {
+  document.getElementById('tagMemoryId').value = m.id;
+  document.getElementById('tagModalMemory').textContent = m.content;
+  document.getElementById('tagInput').value = '';
+  document.getElementById('tagModal').classList.remove('hidden');
+  setTimeout(() => document.getElementById('tagInput').focus(), 100);
+}
+
+document.getElementById('btnCancelTag').addEventListener('click', () => document.getElementById('tagModal').classList.add('hidden'));
+document.getElementById('btnSaveTag').addEventListener('click', async () => {
+  const id = document.getElementById('tagMemoryId').value;
+  const tag = document.getElementById('tagInput').value.trim();
+  if (!tag) { toast('请输入标签名称', 'error'); return; }
+  const res = await api('/tag/' + id, { method: 'POST', body: { tag } });
+  if (res.error) { toast(res.error, 'error'); return; }
+  document.getElementById('tagModal').classList.add('hidden');
+  toast('已添加标签: ' + res.tag, 'success');
+  loadMemories();
+});
+
+// ===== Links Modal =====
+async function openLinksModal(m) {
+  document.getElementById('linksMemoryId').value = m.id;
+  document.getElementById('linksModalMemory').textContent = m.content;
+  document.getElementById('linkToId').value = '';
+  document.getElementById('linkNote').value = '';
+  document.getElementById('linkType').value = 'relates';
+  await refreshLinksList(m.id);
+  document.getElementById('linksModal').classList.remove('hidden');
+}
+
+async function refreshLinksList(memoryId) {
+  const container = document.getElementById('linksListContainer');
+  const data = await api('/links/' + memoryId);
+  const links = data.links || [];
+  if (!links.length) {
+    container.innerHTML = '<p style="color:#9e9e9e;font-size:13px">暂无关系</p>';
+    return;
+  }
+  container.innerHTML = '';
+  links.forEach(l => {
+    const isOut = l.fromId === memoryId;
+    const dir = isOut ? '→' : '←';
+    const other = isOut ? l.toContent : l.fromContent;
+    const otherId = isOut ? l.toId : l.fromId;
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px;border-radius:8px;background:#f9f9f9;margin-bottom:6px';
+    row.innerHTML = `
+      <span class="relation-badge rel-${l.relationType}">${dir} ${l.relationType}</span>
+      <span style="flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${other}">${other}</span>
+      <span style="font-size:10px;color:#bbb">${otherId.slice(0,8)}</span>
+      <button style="border:none;background:none;cursor:pointer;color:#d32f2f;font-size:12px" data-fid="${l.fromId}" data-tid="${l.toId}" data-rt="${l.relationType}" class="unlink-btn">×</button>
+    `;
+    container.appendChild(row);
+  });
+  container.querySelectorAll('.unlink-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const fid = btn.dataset.fid, tid = btn.dataset.tid, rt = btn.dataset.rt;
+      await api('/unlink/' + fid, { method: 'POST', body: { to_id: tid, relation_type: rt } });
+      toast('已移除关系', 'info');
+      await refreshLinksList(memoryId);
+    });
+  });
+}
+
+document.getElementById('btnCancelLinks').addEventListener('click', () => document.getElementById('linksModal').classList.add('hidden'));
+document.getElementById('btnCreateLink').addEventListener('click', async () => {
+  const fromId = document.getElementById('linksMemoryId').value;
+  const toId = document.getElementById('linkToId').value.trim();
+  const relType = document.getElementById('linkType').value;
+  const note = document.getElementById('linkNote').value.trim();
+  if (!toId) { toast('请输入目标记忆 ID', 'error'); return; }
+  const res = await api('/link', { method: 'POST', body: { from_id: fromId, to_id: toId, relation_type: relType, note } });
+  if (res.error) { toast(res.error, 'error'); return; }
+  toast('已建立关系', 'success');
+  document.getElementById('linkToId').value = '';
+  document.getElementById('linkNote').value = '';
+  await refreshLinksList(fromId);
+});
 
 // ===== Event Listeners =====
 document.getElementById('searchInput').addEventListener('input', e => {
@@ -390,6 +709,7 @@ document.querySelectorAll('.modal-overlay').forEach(el => {
 });
 
 // ===== Init =====
+initScopeBar();
 loadMemories();
 setInterval(loadStats, 30000);
 </script>

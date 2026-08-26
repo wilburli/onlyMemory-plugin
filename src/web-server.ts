@@ -6,10 +6,13 @@
  */
 
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { MemoryEngine } from './engine.js';
+import type { Memory } from './models.js';
+import { SqliteStore } from './storage/sqlite-store.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
@@ -93,6 +96,11 @@ export class WebServer {
         if (path === '/memories') return this.getMemories(req, res);
         if (path.startsWith('/memories/')) return this.getMemory(path.slice(10), res);
         if (path === '/stats') return this.getStats(res);
+        if (path === '/scope') return this.getScope(res);
+        if (path === '/sessions') return this.getSessions(res);
+        if (path === '/tags') return this.getAllTags(res);
+        if (path.startsWith('/tags/')) return this.filterByTag(decodeURIComponent(path.slice(6)), res);
+        if (path.startsWith('/links/')) return this.getLinks(path.slice(7), res);
       }
 
       // POST routes
@@ -107,6 +115,10 @@ export class WebServer {
         if (path.startsWith('/unpin/')) return this.unpinMemory(path.slice(7), res);
         if (path.startsWith('/delete/')) return this.deleteMemory(path.slice(8), res);
         if (path === '/forget') return this.forgetMemory(body, res);
+        if (path.startsWith('/tag/')) return this.addTag(path.slice(5), body, res);
+        if (path.startsWith('/untag/')) return this.removeTag(path.slice(7), body, res);
+        if (path === '/link') return this.linkMemories(body, res);
+        if (path.startsWith('/unlink/')) return this.unlinkMemories(path.slice(8), body, res);
       }
 
       return this.json(res, { error: 'Not Found' }, 404);
@@ -123,15 +135,29 @@ export class WebServer {
     const params = new URL(rawUrl, `http://${this.host}:${this.port}`).searchParams;
     const type = params.get('type');
     const search = params.get('search');
+    const scope = (params.get('scope') ?? 'workspace') as 'workspace' | 'session' | 'all';
+    const sessionId = params.get('sessionId') ?? undefined;
     const limit = parseInt(params.get('limit') ?? '100', 10);
 
-    let memories: ReturnType<MemoryEngine['getAllMemories']>;
+    let memories: Memory[];
 
-    if (search) {
-      const results = await this.engine.search(search);
-      memories = results.map((r) => r.memory);
+    if (scope === 'all') {
+      // 跨工作区：扫描所有 projectId 目录，合并记忆（只读，不支持 search）
+      memories = await this.getAllWorkspacesMemories();
+    } else if (scope === 'session') {
+      const sid = sessionId ?? this.engine.getCurrentSessionId() ?? '';
+      if (!sid) {
+        return this.json(res, { memories: [], total: 0, scope, note: 'No active session' });
+      }
+      memories = this.engine.attachTagsToMemories(this.engine.getMemoriesBySession(sid));
     } else {
-      memories = this.engine.getAllMemories();
+      // workspace（默认）
+      if (search) {
+        const results = await this.engine.search(search);
+        memories = this.engine.attachTagsToMemories(results.map((r) => r.memory));
+      } else {
+        memories = this.engine.getAllMemoriesWithTags();
+      }
     }
 
     if (type && type !== 'all') {
@@ -145,7 +171,7 @@ export class WebServer {
     });
 
     memories = memories.slice(0, limit);
-    this.json(res, { memories, total: memories.length });
+    this.json(res, { memories, total: memories.length, scope });
   }
 
   private getMemory(id: string, res: import('node:http').ServerResponse) {
@@ -156,6 +182,24 @@ export class WebServer {
 
   private getStats(res: import('node:http').ServerResponse) {
     this.json(res, this.engine.getStats());
+  }
+
+  /** GET /api/scope — 返回范围元信息：当前工作区、当前会话、所有工作区列表 */
+  private async getScope(res: import('node:http').ServerResponse) {
+    const stats = this.engine.getStats();
+    const workspaces = await this.listWorkspaces(stats.dbPath);
+    this.json(res, {
+      currentWorkspace: stats.projectId,
+      currentSession: stats.currentSession,
+      workspaces,
+    });
+  }
+
+  /** GET /api/sessions — 返回当前工作区的所有会话 ID 列表 */
+  private getSessions(res: import('node:http').ServerResponse) {
+    const sessionIds = this.engine.getSessionIds();
+    const currentSession = this.engine.getCurrentSessionId();
+    this.json(res, { sessionIds, currentSession, total: sessionIds.length });
   }
 
   private async createMemory(body: Record<string, unknown>, res: import('node:http').ServerResponse) {
@@ -198,6 +242,128 @@ export class WebServer {
     if (!query) return this.json(res, { error: 'query is required' }, 400);
     const count = await this.engine.forget(query);
     this.json(res, { deleted: count });
+  }
+
+  // ──────────── 标签 API Handlers ────────────
+
+  private getAllTags(res: import('node:http').ServerResponse) {
+    this.json(res, { tags: this.engine.getAllTags() });
+  }
+
+  private filterByTag(tag: string, res: import('node:http').ServerResponse) {
+    if (!tag) return this.json(res, { error: 'tag is required' }, 400);
+    const memories = this.engine.filterByTag(tag);
+    this.json(res, { tag, memories, total: memories.length });
+  }
+
+  private addTag(memoryId: string, body: Record<string, unknown>, res: import('node:http').ServerResponse) {
+    const tag = body.tag as string;
+    if (!tag) return this.json(res, { error: 'tag is required' }, 400);
+    const mem = this.engine.getMemory(memoryId);
+    if (!mem) return this.json(res, { error: 'Memory not found' }, 404);
+    const ok = this.engine.addTag(memoryId, tag);
+    this.json(res, { ok, tag: tag.trim().toLowerCase() });
+  }
+
+  private removeTag(memoryId: string, body: Record<string, unknown>, res: import('node:http').ServerResponse) {
+    const tag = body.tag as string;
+    if (!tag) return this.json(res, { error: 'tag is required' }, 400);
+    const ok = this.engine.removeTag(memoryId, tag);
+    if (!ok) return this.json(res, { error: 'Tag not found' }, 404);
+    this.json(res, { ok: true });
+  }
+
+  // ──────────── 关系 API Handlers ────────────
+
+  private getLinks(memoryId: string, res: import('node:http').ServerResponse) {
+    const mem = this.engine.getMemory(memoryId);
+    if (!mem) return this.json(res, { error: 'Memory not found' }, 404);
+    const links = this.engine.getLinksForMemory(memoryId);
+    this.json(res, { memoryId, links, total: links.length });
+  }
+
+  private linkMemories(body: Record<string, unknown>, res: import('node:http').ServerResponse) {
+    const { from_id, to_id, relation_type, note, confidence } = body as {
+      from_id: string; to_id: string; relation_type: string;
+      note?: string; confidence?: number;
+    };
+    if (!from_id || !to_id || !relation_type) {
+      return this.json(res, { error: 'from_id, to_id, relation_type are required' }, 400);
+    }
+    const rel = this.engine.linkMemories(
+      from_id, to_id,
+      relation_type as import('./models.js').RelationType,
+      note ?? '',
+      confidence ?? 1.0,
+    );
+    if (!rel) return this.json(res, { error: 'One or both memories not found' }, 404);
+    this.json(res, rel, 201);
+  }
+
+  private unlinkMemories(fromId: string, body: Record<string, unknown>, res: import('node:http').ServerResponse) {
+    const { to_id, relation_type } = body as { to_id: string; relation_type?: string };
+    if (!to_id) return this.json(res, { error: 'to_id is required' }, 400);
+    const count = this.engine.unlinkMemories(
+      fromId, to_id,
+      relation_type as import('./models.js').RelationType | undefined,
+    );
+    this.json(res, { deleted: count });
+  }
+
+  // ──────────── 跨工作区 Helpers ────────────
+
+  /** 列出 dataDir 下所有 projectId（子目录名） */
+  private async listWorkspaces(currentDbPath: string): Promise<string[]> {
+    try {
+      // dataDir = currentDbPath 的上两级（dbPath = dataDir/projectId/memory.db）
+      const projectDir = join(currentDbPath, '..', '..');
+      const entries = await readdir(projectDir, { withFileTypes: true });
+      return entries
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name)
+        .sort();
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * 扫描所有工作区的 db 文件，只读方式合并返回记忆列表。
+   * 为每条记忆附加 _workspace 字段以便 UI 区分来源。
+   */
+  private async getAllWorkspacesMemories(): Promise<Memory[]> {
+    const stats = this.engine.getStats();
+    const workspaces = await this.listWorkspaces(stats.dbPath);
+    // dataDir = dbPath 的上两级
+    const dataDir = join(stats.dbPath, '..', '..');
+    const dbName = stats.dbPath.split(/[\/\\]/).pop() ?? 'memory.db';
+
+    const allMemories: Memory[] = [];
+
+    for (const ws of workspaces) {
+      const dbPath = join(dataDir, ws, dbName);
+      if (!existsSync(dbPath)) continue;
+
+      // 当前工作区直接用已有 engine，避免重复加载 WASM
+      if (ws === stats.projectId) {
+        const mems = this.engine.getAllMemoriesWithTags().map((m) => ({ ...m, _workspace: ws }));
+        allMemories.push(...(mems as Memory[]));
+        continue;
+      }
+
+      // 其他工作区：临时 SqliteStore 只读
+      try {
+        const tmpStore = new SqliteStore(dbPath);
+        await tmpStore.init();
+        const mems = tmpStore.getAllActive().map((m) => ({ ...m, _workspace: ws }));
+        allMemories.push(...(mems as Memory[]));
+        tmpStore.close();
+      } catch {
+        // 忽略加载失败的工作区
+      }
+    }
+
+    return allMemories;
   }
 
   // ──────────── Helpers ────────────

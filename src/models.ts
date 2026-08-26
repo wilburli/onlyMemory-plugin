@@ -44,6 +44,25 @@ export interface Memory {
   createdAt: string;        // ISO datetime
   updatedAt: string;        // ISO datetime
   sourceSession: string | null;
+  tags?: string[];          // 运行时填充（不存入 memories 表）
+}
+
+/** 标签条目 */
+export interface MemoryTag {
+  memoryId: string;
+  tag: string;
+  createdAt: string;
+}
+
+/** 记忆关系条目 */
+export interface MemoryRelation {
+  id: string;
+  fromId: string;
+  toId: string;
+  relationType: RelationType;
+  note: string;       // 关系备注（可为空）
+  confidence: number; // 0.0 ~ 1.0
+  createdAt: string;
 }
 
 /** 会话摘要 */

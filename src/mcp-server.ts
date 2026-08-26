@@ -23,6 +23,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { MemoryEngine } from './engine.js';
 import type { MemoryPluginConfig } from './config.js';
+import { RelationType } from './models.js';
 
 export async function startMcpServer(
   configOverrides?: Partial<MemoryPluginConfig>,
@@ -274,6 +275,126 @@ export async function startMcpServer(
       return {
         content: [{ type: 'text', text: `Imported ${count} memories from ${filePath}` }],
       };
+    },
+  );
+
+  // ================================================================ //
+  // 工具: add_tag - 给记忆添加标签
+  // ================================================================ //
+  server.tool(
+    'add_tag',
+    'Add a custom tag to a memory for classification. Tags are lowercase and trimmed automatically. ' +
+    'Use this to categorize memories (e.g., "work", "personal", "important", "project-x").',
+    {
+      id:  z.string().describe('The memory ID to tag'),
+      tag: z.string().describe('Tag name (e.g. "work", "personal", "important")'),
+    },
+    async ({ id, tag }) => {
+      const mem = engine.getMemory(id);
+      if (!mem) return { content: [{ type: 'text', text: `Memory not found: ${id}` }] };
+      const ok = engine.addTag(id, tag);
+      const norm = tag.trim().toLowerCase();
+      if (!ok) return { content: [{ type: 'text', text: `Tag "${norm}" already exists on memory ${id}` }] };
+      return { content: [{ type: 'text', text: `Added tag "${norm}" to memory ${id}` }] };
+    },
+  );
+
+  // ================================================================ //
+  // 工具: remove_tag - 移除标签
+  // ================================================================ //
+  server.tool(
+    'remove_tag',
+    'Remove a tag from a memory.',
+    {
+      id:  z.string().describe('The memory ID'),
+      tag: z.string().describe('Tag name to remove'),
+    },
+    async ({ id, tag }) => {
+      const ok = engine.removeTag(id, tag);
+      if (!ok) return { content: [{ type: 'text', text: `Tag "${tag.trim().toLowerCase()}" not found on memory ${id}` }] };
+      return { content: [{ type: 'text', text: `Removed tag "${tag.trim().toLowerCase()}" from memory ${id}` }] };
+    },
+  );
+
+  // ================================================================ //
+  // 工具: filter_by_tag - 按标签列出记忆
+  // ================================================================ //
+  server.tool(
+    'filter_by_tag',
+    'List all memories that have a specific tag. Use this to retrieve categorized memories.',
+    {
+      tag:   z.string().describe('Tag name to filter by'),
+      limit: z.number().int().min(1).max(50).default(20).describe('Max results (default 20)'),
+    },
+    async ({ tag, limit }) => {
+      const memories = engine.filterByTag(tag);
+      if (memories.length === 0) {
+        return { content: [{ type: 'text', text: `No memories found with tag "${tag.trim().toLowerCase()}"` }] };
+      }
+      const lines = memories.slice(0, limit).map((m) => {
+        const pin = m.pinned ? ' 📌' : '';
+        const tags = m.tags?.length ? ` [tags: ${m.tags.join(', ')}]` : '';
+        return `- [${m.type}] ${m.content} (importance: ${m.importance.toFixed(2)}, id: ${m.id})${pin}${tags}`;
+      });
+      lines.unshift(`Found ${memories.length} memories with tag "${tag.trim().toLowerCase()}" (showing ${Math.min(limit, memories.length)}):\n`);
+      return { content: [{ type: 'text', text: lines.join('\n') }] };
+    },
+  );
+
+  // ================================================================ //
+  // 工具: link_memories - 建立记忆关系
+  // ================================================================ //
+  server.tool(
+    'link_memories',
+    'Create a directional relationship between two memories. ' +
+    'Relation types: contradicts (conflicting info), supports (corroborating info), updates (newer supersedes older), relates (general association). ' +
+    'Use this to mark when a new memory contradicts or updates an existing one.',
+    {
+      from_id:       z.string().describe('Source memory ID'),
+      to_id:         z.string().describe('Target memory ID'),
+      relation_type: z.enum(['contradicts', 'supports', 'updates', 'relates']).describe('Type of relationship'),
+      note:          z.string().default('').describe('Optional note explaining the relationship'),
+      confidence:    z.number().min(0).max(1).default(1.0).describe('Confidence score 0-1 (default 1.0)'),
+    },
+    async ({ from_id, to_id, relation_type, note, confidence }) => {
+      const relType = relation_type as RelationType;
+      const rel = engine.linkMemories(from_id, to_id, relType, note, confidence);
+      if (!rel) {
+        return { content: [{ type: 'text', text: `Failed to link: one or both memory IDs not found (${from_id}, ${to_id})` }] };
+      }
+      return {
+        content: [{ type: 'text', text: `Linked memories:\n  [${from_id}] --${relation_type}--> [${to_id}]${note ? `\n  Note: ${note}` : ''}` }],
+      };
+    },
+  );
+
+  // ================================================================ //
+  // 工具: get_links - 查看记忆关系
+  // ================================================================ //
+  server.tool(
+    'get_links',
+    'Get all relationships associated with a memory (both incoming and outgoing). ' +
+    'Useful for understanding how a memory connects to others.',
+    {
+      id: z.string().describe('The memory ID to get relationships for'),
+    },
+    async ({ id }) => {
+      const mem = engine.getMemory(id);
+      if (!mem) return { content: [{ type: 'text', text: `Memory not found: ${id}` }] };
+      const links = engine.getLinksForMemory(id);
+      if (links.length === 0) {
+        return { content: [{ type: 'text', text: `No relationships found for memory ${id}` }] };
+      }
+      const lines = links.map((l) => {
+        const dir = l.fromId === id ? '→' : '←';
+        const other = l.fromId === id ? l.toContent : l.fromContent;
+        const otherId = l.fromId === id ? l.toId : l.fromId;
+        const conf = l.confidence < 1 ? ` (confidence: ${l.confidence.toFixed(2)})` : '';
+        const note = l.note ? ` | Note: ${l.note}` : '';
+        return `  ${dir} [${l.relationType}] "${other}" (id: ${otherId})${conf}${note}`;
+      });
+      lines.unshift(`Relationships for memory "${mem.content}" (id: ${id}):\n`);
+      return { content: [{ type: 'text', text: lines.join('\n') }] };
     },
   );
 
