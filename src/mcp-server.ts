@@ -24,7 +24,11 @@ import { z } from 'zod';
 import { MemoryEngine } from './engine.js';
 import type { MemoryPluginConfig } from './config.js';
 
-export async function startMcpServer(configOverrides?: Partial<MemoryPluginConfig>, externalEngine?: MemoryEngine): Promise<void> {
+export async function startMcpServer(
+  configOverrides?: Partial<MemoryPluginConfig>,
+  externalEngine?: MemoryEngine,
+  webUrl?: string,
+): Promise<void> {
   const engine = externalEngine ?? new MemoryEngine(configOverrides);
   if (!externalEngine) await engine.init();
 
@@ -51,7 +55,7 @@ export async function startMcpServer(configOverrides?: Partial<MemoryPluginConfi
       importance: z.number().min(0).max(1).default(1.0).describe('Importance score 0-1 (default 1.0)'),
     },
     async ({ content, importance }) => {
-      engine.remember(content, importance);
+      await engine.remember(content, importance);
       return {
         content: [{ type: 'text', text: `Remembered: ${content}` }],
       };
@@ -88,7 +92,7 @@ export async function startMcpServer(configOverrides?: Partial<MemoryPluginConfi
       limit: z.number().int().min(1).max(20).default(5).describe('Max results (default 5)'),
     },
     async ({ query, limit }) => {
-      const results = engine.search(query);
+      const results = await engine.search(query);
       if (results.length === 0) {
         return { content: [{ type: 'text', text: 'No relevant memories found.' }] };
       }
@@ -113,12 +117,13 @@ export async function startMcpServer(configOverrides?: Partial<MemoryPluginConfi
     {},
     async () => {
       const s = engine.getStats();
-      const text = [
+      const lines = [
         `Active memories: ${s.active}`,
         `Project: ${s.projectId}`,
         `Database: ${s.dbPath}`,
-      ].join('\n');
-      return { content: [{ type: 'text', text }] };
+      ];
+      if (webUrl) lines.push(`Web UI: ${webUrl}`);
+      return { content: [{ type: 'text', text: lines.join('\n') }] };
     },
   );
 
@@ -265,7 +270,7 @@ export async function startMcpServer(configOverrides?: Partial<MemoryPluginConfi
       path: z.string().describe('Absolute file path to import from'),
     },
     async ({ path: filePath }) => {
-      const count = engine.importFromFile(filePath);
+      const count = await engine.importFromFile(filePath);
       return {
         content: [{ type: 'text', text: `Imported ${count} memories from ${filePath}` }],
       };

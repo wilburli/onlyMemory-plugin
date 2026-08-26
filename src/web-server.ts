@@ -118,7 +118,7 @@ export class WebServer {
 
   // ──────────── API Handlers ────────────
 
-  private getMemories(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) {
+  private async getMemories(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) {
     const rawUrl = req.url ?? '/';
     const params = new URL(rawUrl, `http://${this.host}:${this.port}`).searchParams;
     const type = params.get('type');
@@ -128,7 +128,7 @@ export class WebServer {
     let memories: ReturnType<MemoryEngine['getAllMemories']>;
 
     if (search) {
-      const results = this.engine.search(search);
+      const results = await this.engine.search(search);
       memories = results.map((r) => r.memory);
     } else {
       memories = this.engine.getAllMemories();

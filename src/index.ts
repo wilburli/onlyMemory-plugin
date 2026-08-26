@@ -116,21 +116,21 @@ export async function apply(ctx: CordisContext, config: Partial<Config>): Promis
   // ---- 监听对话事件 ----
 
   // Hook 1: 对话前 - 检索记忆
-  ctx.on('before-message', (event: unknown) => {
+  ctx.on('before-message', async (event: unknown) => {
     const e = event as { content?: string; systemPrompt?: string };
     if (!e?.content) return;
 
-    const memoryContext = engine.onUserMessage(e.content);
+    const memoryContext = await engine.onUserMessage(e.content);
     if (memoryContext && e.systemPrompt) {
       e.systemPrompt += '\n\n' + memoryContext;
     }
   });
 
   // Hook 2: 对话后 - 存储记忆
-  ctx.on('after-message', (event: unknown) => {
+  ctx.on('after-message', async (event: unknown) => {
     const e = event as { content?: string; userMessage?: string };
     if (e?.content) {
-      engine.onAssistantMessage(e.content, e.userMessage ?? '');
+      await engine.onAssistantMessage(e.content, e.userMessage ?? '');
     }
   });
 
@@ -158,7 +158,7 @@ export async function apply(ctx: CordisContext, config: Partial<Config>): Promis
         required: ['content'],
       },
       execute: async (args) => {
-        engine.remember(args.content as string, (args.importance as number) ?? 1.0);
+        await engine.remember(args.content as string, (args.importance as number) ?? 1.0);
         return `已记住: ${args.content}`;
       },
     });
@@ -192,7 +192,7 @@ export async function apply(ctx: CordisContext, config: Partial<Config>): Promis
         required: ['query'],
       },
       execute: async (args) => {
-        const results = engine.search(args.query as string);
+        const results = await engine.search(args.query as string);
         if (results.length === 0) return '未找到相关记忆';
         return results
           .map((r) => `[${r.memory.type}] ${r.memory.content} (相关度: ${(r.score * 100).toFixed(0)}%)`)

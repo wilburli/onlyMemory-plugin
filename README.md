@@ -19,6 +19,7 @@
 - [配置参考](#配置参考)
 - [MCP 工具清单](#mcp-工具清单)
 - [Web 管理界面](#web-管理界面)
+- [Embedding 配置](#embedding-配置)
 - [二次开发指南](#二次开发指南)
 - [数据存储结构](#数据存储结构)
 - [常见问题](#常见问题)
@@ -441,6 +442,9 @@ class WebServer {
 | `ONLYMEM_PROJECT` | `default` | 项目标识 |
 | `ONLYMEM_DATA_DIR` | `~/.onlymem` | 数据存储目录 |
 | `ONLYMEM_WEB_PORT`  | `3456` | Web 管理界面端口（0 = 禁用） |
+| `OPENAI_API_KEY`    | 无 | OpenAI API 密钥（embeddingBackend=openai 时需要） |
+| `OPENAI_BASE_URL`   | 无 | 自定义 OpenAI API 地址（可选） |
+| `DASHSCOPE_API_KEY` | 无 | 阿里云 DashScope API 密钥（embeddingBackend=dashscope 时需要） |
 | `SQL_JS_WASM_PATH` | 自动探测 | sql.js WASM 文件路径 |
 
 ### Harness patch 配置
@@ -515,6 +519,94 @@ Web 服务器同时暴露 REST API，方便二次开发集成：
 | `POST` | `/api/unpin/:id` | 取消置顶 |
 | `POST` | `/api/delete/:id` | 删除 |
 | `POST` | `/api/forget` | 按关键词删除 `{query}` |
+
+---
+
+## Embedding 配置
+
+默认使用**关键词检索**（`embeddingBackend: 'none'`），无需任何额外依赖。  
+如需语义检索能力，可切换为以下三种后端之一：
+
+| 后端 | 配置值 | 依赖 | 适用场景 |
+|------|---------|------|----------|
+| 关键词检索 | `none`（默认） | 无 | 轻量、零配置、离线 |
+| OpenAI API | `openai` | 无（需 API Key） | 高质量、联网 |
+| 阿里云 DashScope | `dashscope` | 无（需 API Key） | 中文优化、国内网络 |
+| 本地 WASM 模型 | `local` | `@xenova/transformers` | 离线、免费、无网络 |
+
+### 方案 A：云端 API（最简单）
+
+只需配置 API Key 环境变量，无需安装任何东西：
+
+```bash
+# OpenAI
+export OPENAI_API_KEY="sk-xxx"
+
+# 或阿里云 DashScope（中文效果更好）
+export DASHSCOPE_API_KEY="sk-xxx"
+```
+
+然后在 Harness patch 配置中启用：
+
+```yaml
+- set:
+    id: memory-onlymemory
+    config:
+      env:
+        ONLYMEM_PROJECT: default
+        OPENAI_API_KEY: sk-xxx          # 或 DASHSCOPE_API_KEY
+```
+
+> **自定义 API 地址？** 设置 `OPENAI_BASE_URL` 环境变量，可兼容任何 OpenAI 兼容接口（如 Ollama、LM Studio）。
+
+### 方案 B：本地 WASM 模型（推荐离线场景）
+
+使用 `@xenova/transformers` 在浏览器/Node.js 中运行模型，完全离线：
+
+```bash
+# 安装可选依赖
+cd onlyMemory-plugin
+npm install @xenova/transformers
+
+# 首次运行时自动下载模型（~47MB，缓存在 ~/.cache）
+```
+
+然后在 patch 配置中启用：
+
+```yaml
+- set:
+    id: memory-onlymemory
+    config:
+      env:
+        ONLYMEM_PROJECT: default
+```
+
+并在 `cordis.patch.yml` 中设置 `embeddingBackend: local`：
+
+```yaml
+- set:
+    id: memory-onlymemory
+    config:
+      embeddingBackend: local
+      embeddingModel: paraphrase-multilingual-MiniLM-L12-v2
+      embeddingDim: 384
+```
+
+### 降级机制
+
+如果配置了 embedding 后端但初始化失败（缺少 API Key、模型下载失败等），插件会**自动降级为关键词检索**，不会崩溃。
+
+### 语义检索权重
+
+启用 embedding 后，多路召回的权重分配：
+
+| 召回通道 | 无 embedding 时 | 有 embedding 时 |
+|----------|--------------|---------------|
+| 语义向量 | — | 0.50 |
+| FTS 全文 | 0.35 | 0.20 |
+| 实体匹配 | 0.15 | 0.15 |
+| 重要度 | 0.10 | 0.10 |
+| 时效性 | 0.05 | 0.05 |
 
 ---
 

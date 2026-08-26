@@ -18,6 +18,7 @@ import { MultiRecallRetriever } from './retriever/multi-recall.js';
 import { DecayManager } from './maintenance/decay.js';
 import { MemoryMerger } from './maintenance/merger.js';
 import { MemoryCleaner } from './maintenance/cleaner.js';
+import { createEmbeddingProvider, type EmbeddingProvider } from './embedding/embedding-provider.js';
 import * as fs from 'node:fs';
 
 const EXPORT_VERSION = '1.0';
@@ -33,6 +34,7 @@ export class MemoryEngine {
   private decay: DecayManager;
   private merger: MemoryMerger;
   private cleaner: MemoryCleaner;
+  private embeddingProvider: EmbeddingProvider | null = null;
 
   private currentSessionId: string | null = null;
   private sessionUserMsgs: string[] = [];
@@ -59,11 +61,19 @@ export class MemoryEngine {
     await this.store.init();
 
     this.sessionStore = new SessionStore(getSessionDir(this.config));
+
+    // 初始化 Embedding 提供者（可选）
+    this.embeddingProvider = await createEmbeddingProvider(this.config);
+    if (this.embeddingProvider) {
+      console.log(`[OnlyMemory] Embedding 已启用: ${this.config.embeddingBackend} / ${this.config.embeddingModel}`);
+    }
+
     this.retriever = new MultiRecallRetriever(
       this.config,
       this.store,
       this.vectorStore,
       this.extractor,
+      this.embeddingProvider,
     );
 
     // 加载向量索引
@@ -76,7 +86,7 @@ export class MemoryEngine {
   // ================================================================ //
 
   /** 处理用户消息：检索相关记忆，返回注入到 system prompt 的记忆文本 */
-  onUserMessage(msg: string): string {
+  async onUserMessage(msg: string): Promise<string> {
     this.ensureInitialized();
     if (!this.currentSessionId) this.startSession();
     this.sessionUserMsgs.push(msg);
@@ -84,25 +94,40 @@ export class MemoryEngine {
   }
 
   /** 对话结束后处理：提取新信息、评分、入库 */
-  onAssistantMessage(msg: string, userMsg: string = ''): void {
+  async onAssistantMessage(msg: string, userMsg: string = ''): Promise<void> {
     this.ensureInitialized();
     this.sessionAssistantMsgs.push(msg);
-    this.extractAndStore(userMsg, msg);
+    await this.extractAndStore(userMsg, msg);
   }
 
-  /** 显式指令：强制记住一条事实 */
-  remember(fact: string, importance: number = 1.0): void {
+  /** 显式指令：强制记住一条事实（内容完全相同时更新而非新增）*/
+  async remember(fact: string, importance: number = 1.0): Promise<Memory> {
     this.ensureInitialized();
+
+    // 去重：内容完全相同则直接更新重要度，不新增
+    const existing = this.store.findByContent(fact);
+    if (existing) {
+      if (importance > existing.importance) {
+        this.store.updateMemory(existing.id, { importance });
+      }
+      return existing;
+    }
+
     const entities = this.extractor.extract(fact);
+    const embedding = this.embeddingProvider ? await this.embeddingProvider.embed(fact) : null;
     const mem = createMemory({
       content: fact,
       type: MemoryType.Fact,
       entities,
       importance,
-      embedding: null,
+      embedding,
       sourceSession: this.currentSessionId,
     });
     this.store.insertMemory(mem);
+    if (embedding) this.vectorStore.add(mem.id, embedding);
+    // 新增后立即运行合并，清理可能的相似重复
+    this.merger.merge(this.store);
+    return mem;
   }
 
   /** 按关键词删除相关记忆 */
@@ -129,7 +154,7 @@ export class MemoryEngine {
   }
 
   /** 搜索记忆 */
-  search(query: string): RetrievalResult[] {
+  async search(query: string): Promise<RetrievalResult[]> {
     this.ensureInitialized();
     return this.retriever.retrieve(query);
   }
@@ -231,7 +256,7 @@ export class MemoryEngine {
   }
 
   /** 从 JSON 文件导入记忆 */
-  importFromFile(filePath: string): number {
+  async importFromFile(filePath: string): Promise<number> {
     this.ensureInitialized();
     const raw = fs.readFileSync(filePath, 'utf-8');
     const data = JSON.parse(raw);
@@ -244,7 +269,7 @@ export class MemoryEngine {
       const content = (entry.content as string) ?? '';
       if (!content) continue;
 
-      this.remember(
+      await this.remember(
         content,
         typeof entry.importance === 'number' ? entry.importance : 0.5,
       );
@@ -284,8 +309,8 @@ export class MemoryEngine {
     this.vectorStore.load(entries);
   }
 
-  private extractAndStore(userMsg: string, assistantMsg: string): void {
-    // MVP 模式：规则提取（不依赖 LLM）
+  private async extractAndStore(userMsg: string, assistantMsg: string): Promise<void> {
+    // 规则提取（不依赖 LLM）
     const text = userMsg || assistantMsg;
     if (text.length < 5) return;
 
@@ -294,16 +319,27 @@ export class MemoryEngine {
     if (scoreResult.score < this.config.importanceThreshold) return;
 
     const entities = this.extractor.extract(text);
+    const embedding = this.embeddingProvider ? await this.embeddingProvider.embed(text) : null;
     const mem = createMemory({
       content: text,
       type: this.inferType(text),
       entities,
       importance: scoreResult.score,
-      embedding: null,
+      embedding,
       sourceSession: this.currentSessionId,
     });
 
+    // 去重：内容完全相同则更新重要度，不新增
+    const existing = this.store.findByContent(text);
+    if (existing) {
+      if (scoreResult.score > existing.importance) {
+        this.store.updateMemory(existing.id, { importance: scoreResult.score });
+      }
+      return;
+    }
+
     this.store.insertMemory(mem);
+    if (embedding) this.vectorStore.add(mem.id, embedding);
   }
 
   private inferType(text: string): MemoryType {

@@ -39,22 +39,36 @@ await engine.init();
 // Web 端口（默认 3456，设为 0 可禁用）
 const webPort = parseInt(process.env.ONLYMEM_WEB_PORT || '3456', 10);
 
-// 启动 Web 管理界面
+// 启动 Web 管理界面（端口冲突时自动重试其他端口）
 let webServer = null;
+let actualWebUrl = null;
 if (webPort > 0) {
-  webServer = new WebServer({ engine, port: webPort });
-  try {
-    await webServer.start();
-    process.stderr.write(`[OnlyMemory] Web UI: http://127.0.0.1:${webPort}\n`);
-  } catch (err) {
-    process.stderr.write(`[OnlyMemory] Web server failed: ${err.message}\n`);
-    process.stderr.write(`[OnlyMemory] Set ONLYMEM_WEB_PORT=0 to disable web UI\n`);
-    webServer = null;
+  const tryPorts = [webPort, webPort + 1, webPort + 2, webPort + 3];
+  for (const port of tryPorts) {
+    webServer = new WebServer({ engine, port });
+    try {
+      await webServer.start();
+      actualWebUrl = `http://127.0.0.1:${port}`;
+      process.stderr.write(`[OnlyMemory] Web UI: ${actualWebUrl}\n`);
+      break;
+    } catch (err) {
+      if (err.code === 'EADDRINUSE') {
+        process.stderr.write(`[OnlyMemory] Port ${port} in use, trying ${port + 1}...\n`);
+        webServer = null;
+      } else {
+        process.stderr.write(`[OnlyMemory] Web server failed: ${err.message}\n`);
+        webServer = null;
+        break;
+      }
+    }
+  }
+  if (!webServer) {
+    process.stderr.write(`[OnlyMemory] Could not bind Web UI on any port. Set ONLYMEM_WEB_PORT=0 to disable.\n`);
   }
 }
 
-// 启动 MCP stdio 服务器（共享同一个引擎）
-await startMcpServer(config, engine);
+// 启动 MCP stdio 服务器（共享同一个引擎，传入实际 Web URL）
+await startMcpServer(config, engine, actualWebUrl);
 
 // 优雅关闭
 const shutdown = async () => {

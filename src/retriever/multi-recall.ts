@@ -14,28 +14,32 @@ import type { MemoryPluginConfig } from '../config.js';
 import type { SqliteStore } from '../storage/sqlite-store.js';
 import type { LocalVectorStore } from '../storage/vector-store.js';
 import type { EntityExtractor } from '../encoder/entity-extractor.js';
+import type { EmbeddingProvider } from '../embedding/embedding-provider.js';
 
 export class MultiRecallRetriever {
   private config: MemoryPluginConfig;
   private store: SqliteStore;
   private vectorStore: LocalVectorStore;
   private extractor: EntityExtractor;
+  private embeddingProvider: EmbeddingProvider | null;
 
   constructor(
     config: MemoryPluginConfig,
     store: SqliteStore,
     vectorStore: LocalVectorStore,
     extractor: EntityExtractor,
+    embeddingProvider: EmbeddingProvider | null = null,
   ) {
     this.config = config;
     this.store = store;
     this.vectorStore = vectorStore;
     this.extractor = extractor;
+    this.embeddingProvider = embeddingProvider;
   }
 
   /** 检索相关记忆并返回格式化的上下文文本 */
-  retrieveContextText(query: string): string {
-    const results = this.retrieve(query);
+  async retrieveContextText(query: string): Promise<string> {
+    const results = await this.retrieve(query);
     if (results.length === 0) return '';
 
     const lines = results.map((r) => `- [${r.memory.type}] ${r.memory.content}`);
@@ -43,19 +47,30 @@ export class MultiRecallRetriever {
   }
 
   /** 多路召回检索 */
-  retrieve(query: string): RetrievalResult[] {
+  async retrieve(query: string): Promise<RetrievalResult[]> {
     const topK = this.config.topK;
     const allResults = new Map<string, RetrievalResult>();
     const scoreAccum = new Map<string, number>();
 
-    // 1. 语义检索（如果有 embedding）
-    // 注意：MVP 模式下 embedding 为 none，跳过语义检索
+    // 1. 语义检索（如果有 embedding 提供者）
+    if (this.embeddingProvider) {
+      const queryEmbedding = await this.embeddingProvider.embed(query);
+      if (queryEmbedding) {
+        const vectorResults = this.recallVector(queryEmbedding, topK * 2);
+        for (const r of vectorResults) {
+          const key = r.memory.id;
+          scoreAccum.set(key, (scoreAccum.get(key) ?? 0) + r.score * 0.50);
+          allResults.set(key, r);
+        }
+      }
+    }
 
     // 2. FTS 全文检索
+    const ftsWeight = this.embeddingProvider ? 0.20 : 0.35;
     const ftsResults = this.recallFts(query, topK * 2);
     for (const r of ftsResults) {
       const key = r.memory.id;
-      scoreAccum.set(key, (scoreAccum.get(key) ?? 0) + r.score * 0.2);
+      scoreAccum.set(key, (scoreAccum.get(key) ?? 0) + r.score * ftsWeight);
       allResults.set(key, r);
     }
 
@@ -103,6 +118,17 @@ export class MultiRecallRetriever {
   // ================================================================ //
   // 各路召回实现
   // ================================================================ //
+
+  private recallVector(queryEmbedding: Float32Array, limit: number): RetrievalResult[] {
+    const hits = this.vectorStore.search(queryEmbedding, limit);
+    const results: RetrievalResult[] = [];
+    for (const [id, score] of hits) {
+      const mem = this.store.getMemory(id);
+      if (!mem) continue;
+      results.push({ memory: mem, score, source: 'semantic' });
+    }
+    return results;
+  }
 
   private recallFts(query: string, limit: number): RetrievalResult[] {
     const hits = this.store.ftsSearch(query, limit);

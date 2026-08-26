@@ -260,6 +260,20 @@ export class SqliteStore {
     return results[0].values.map((row: unknown[]) => rowToMemory(results[0].columns, row));
   }
 
+  /**
+   * 按内容精确查找活跃记忆（用于写入去重）
+   * 返回内容完全相同的第一条活跃记忆，没有则返回 null
+   */
+  findByContent(content: string): Memory | null {
+    if (!this.db) return null;
+    const results = this.db.exec(
+      "SELECT * FROM memories WHERE status = 'active' AND content = ? LIMIT 1",
+      [content],
+    );
+    if (results.length === 0 || results[0].values.length === 0) return null;
+    return rowToMemory(results[0].columns, results[0].values[0]);
+  }
+
   /** 获取活跃记忆数量 */
   getActiveCount(): number {
     if (!this.db) return 0;
