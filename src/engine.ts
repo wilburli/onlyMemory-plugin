@@ -158,6 +158,12 @@ export class MemoryEngine {
     return this.store.unpinMemory(id);
   }
 
+  /** 按 ID 删除单条记忆 */
+  deleteMemory(id: string): boolean {
+    this.ensureInitialized();
+    return this.store.deleteMemory(id);
+  }
+
   /** 获取所有活跃记忆 */
   getAllMemories(): Memory[] {
     this.ensureInitialized();

@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OnlyMemory - Memory Manager</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background:#f0f2f5;color:#1a1a2e;line-height:1.6;min-height:100vh}
+
+/* Header */
+.header{background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%);color:#fff;padding:20px 0;box-shadow:0 2px 12px rgba(0,0,0,.15)}
+.header-inner{max-width:1200px;margin:0 auto;padding:0 24px;display:flex;justify-content:space-between;align-items:center}
+.header h1{font-size:24px;font-weight:700;display:flex;align-items:center;gap:8px}
+.header-icon{font-size:28px}
+.stats-bar{display:flex;gap:24px}
+.stat-item{text-align:center}
+.stat-value{font-size:20px;font-weight:700;color:#64b5f6}
+.stat-label{font-size:11px;color:rgba(255,255,255,.6);text-transform:uppercase;letter-spacing:.5px}
+
+/* Toolbar */
+.toolbar{max-width:1200px;margin:20px auto;padding:0 24px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.search-box{flex:1;min-width:200px;position:relative}
+.search-box input{width:100%;padding:10px 16px 10px 40px;border:2px solid #e0e0e0;border-radius:8px;font-size:14px;outline:none;transition:border-color .2s}
+.search-box input:focus{border-color:#1976d2}
+.search-box::before{content:'🔍';position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:16px}
+.filter-group{display:flex;gap:6px}
+.filter-btn{padding:8px 16px;border:2px solid #e0e0e0;border-radius:8px;background:#fff;cursor:pointer;font-size:13px;transition:all .2s;white-space:nowrap}
+.filter-btn:hover{border-color:#90caf9;background:#e3f2fd}
+.filter-btn.active{border-color:#1976d2;background:#1976d2;color:#fff}
+.btn-add{padding:10px 20px;background:#1976d2;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;transition:background .2s;white-space:nowrap}
+.btn-add:hover{background:#1565c0}
+
+/* Cards grid */
+.content{max-width:1200px;margin:0 auto;padding:0 24px 40px}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:16px}
+
+/* Card */
+.card{background:#fff;border-radius:12px;padding:16px 20px;box-shadow:0 1px 4px rgba(0,0,0,.06);border:1px solid #e8eaed;transition:all .2s;position:relative;display:flex;flex-direction:column;gap:10px}
+.card:hover{box-shadow:0 4px 16px rgba(0,0,0,.1);transform:translateY(-2px)}
+.card.pinned{border-color:#ffc107;background:#fffde7}
+.card-header{display:flex;align-items:center;gap:8px}
+.type-badge{padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.3px}
+.type-badge.fact{background:#e3f2fd;color:#1565c0}
+.type-badge.preference{background:#f3e5f5;color:#7b1fa2}
+.type-badge.event{background:#e8f5e9;color:#2e7d32}
+.type-badge.behavior{background:#fff3e0;color:#e65100}
+.pin-icon{font-size:16px;margin-left:auto}
+.importance-mini{font-size:11px;color:#9e9e9e;margin-left:auto}
+.card-content{font-size:14px;color:#333;line-height:1.6;word-break:break-word}
+.card-meta{display:flex;align-items:center;gap:12px;font-size:12px;color:#9e9e9e;flex-wrap:wrap}
+.importance-bar{flex:1;height:4px;background:#e0e0e0;border-radius:2px;min-width:60px}
+.importance-fill{height:100%;border-radius:2px;transition:width .3s}
+.importance-fill.high{background:#4caf50}
+.importance-fill.medium{background:#ff9800}
+.importance-fill.low{background:#f44336}
+.card-actions{display:flex;gap:6px;justify-content:flex-end}
+.action-btn{padding:5px 12px;border:1px solid #e0e0e0;border-radius:6px;background:#fff;cursor:pointer;font-size:12px;transition:all .15s}
+.action-btn:hover{background:#f5f5f5;border-color:#bdbdbd}
+.action-btn.pin{color:#f57f17;border-color:#fdd835}
+.action-btn.pin:hover{background:#fffde7}
+.action-btn.edit{color:#1976d2;border-color:#64b5f6}
+.action-btn.edit:hover{background:#e3f2fd}
+.action-btn.delete{color:#d32f2f;border-color:#ef9a9a}
+.action-btn.delete:hover{background:#ffebee}
+
+/* Empty state */
+.empty-state{text-align:center;padding:60px 20px;color:#9e9e9e}
+.empty-state .emoji{font-size:48px;margin-bottom:16px}
+
+/* Loading */
+.loading{text-align:center;padding:40px;color:#9e9e9e}
+
+/* Modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;justify-content:center;align-items:center;z-index:1000;opacity:1;transition:opacity .2s}
+.modal-overlay.hidden{display:none}
+.modal{background:#fff;border-radius:16px;padding:28px;width:90%;max-width:500px;box-shadow:0 20px 60px rgba(0,0,0,.2)}
+.modal h2{margin-bottom:20px;font-size:20px}
+.form-group{margin-bottom:14px}
+.form-group label{display:block;font-size:13px;font-weight:600;color:#555;margin-bottom:4px}
+.form-group input,.form-group textarea,.form-group select{width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px;outline:none;font-family:inherit;transition:border-color .2s}
+.form-group input:focus,.form-group textarea:focus,.form-group select:focus{border-color:#1976d2}
+.form-group textarea{resize:vertical;min-height:80px}
+.modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px}
+.btn-cancel{padding:10px 20px;border:1px solid #ddd;border-radius:8px;background:#fff;cursor:pointer;font-size:14px}
+.btn-cancel:hover{background:#f5f5f5}
+.btn-save{padding:10px 20px;background:#1976d2;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600}
+.btn-save:hover{background:#1565c0}
+.btn-danger{padding:10px 20px;background:#d32f2f;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px}
+.btn-danger:hover{background:#c62828}
+
+/* Toast */
+.toast{position:fixed;bottom:24px;right:24px;padding:12px 24px;border-radius:8px;color:#fff;font-size:14px;z-index:2000;animation:slideIn .3s ease;box-shadow:0 4px 12px rgba(0,0,0,.15)}
+.toast.success{background:#2e7d32}
+.toast.error{background:#c62828}
+.toast.info{background:#1565c0}
+@keyframes slideIn{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
+
+/* Footer */
+.footer{text-align:center;padding:20px;color:#bbb;font-size:12px}
+
+/* Responsive */
+@media(max-width:640px){
+  .cards{grid-template-columns:1fr}
+  .header-inner{flex-direction:column;gap:12px;text-align:center}
+  .toolbar{flex-direction:column}
+  .search-box{width:100%}
+  .filter-group{width:100%;overflow-x:auto}
+}
+</style>
+</head>
+<body>
+
+<header class="header">
+  <div class="header-inner">
+    <h1><span class="header-icon">🧠</span> OnlyMemory</h1>
+    <div class="stats-bar">
+      <div class="stat-item"><div class="stat-value" id="statTotal">-</div><div class="stat-label">Total</div></div>
+      <div class="stat-item"><div class="stat-value" id="statPinned">-</div><div class="stat-label">Pinned</div></div>
+      <div class="stat-item"><div class="stat-value" id="statProject">-</div><div class="stat-label">Project</div></div>
+    </div>
+  </div>
+</header>
+
+<div class="toolbar">
+  <div class="search-box"><input type="text" id="searchInput" placeholder="搜索记忆..."></div>
+  <div class="filter-group">
+    <button class="filter-btn active" data-type="all">全部</button>
+    <button class="filter-btn" data-type="fact">Fact</button>
+    <button class="filter-btn" data-type="preference">Pref</button>
+    <button class="filter-btn" data-type="event">Event</button>
+    <button class="filter-btn" data-type="behavior">Behavior</button>
+    <button class="filter-btn" data-type="pinned">📌 Pinned</button>
+  </div>
+  <button class="btn-add" id="btnAdd">+ 新建记忆</button>
+</div>
+
+<main class="content">
+  <div id="cardsContainer" class="cards"><div class="loading">加载中...</div></div>
+</main>
+
+<!-- Edit / Create Modal -->
+<div id="editModal" class="modal-overlay hidden">
+  <div class="modal">
+    <h2 id="modalTitle">编辑记忆</h2>
+    <input type="hidden" id="editId">
+    <div class="form-group">
+      <label>内容</label>
+      <textarea id="editContent" rows="4" placeholder="记忆内容..."></textarea>
+    </div>
+    <div class="form-group">
+      <label>重要度 (0 ~ 1)</label>
+      <input type="number" id="editImportance" min="0" max="1" step="0.1" value="0.5">
+    </div>
+    <div class="form-group">
+      <label>类型</label>
+      <select id="editType">
+        <option value="fact">Fact</option>
+        <option value="preference">Preference</option>
+        <option value="event">Event</option>
+        <option value="behavior">Behavior</option>
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="btnCancelEdit">取消</button>
+      <button class="btn-save" id="btnSaveEdit">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- Delete Confirm Modal -->
+<div id="deleteModal" class="modal-overlay hidden">
+  <div class="modal">
+    <h2>确认删除</h2>
+    <p style="margin-bottom:16px;color:#666">确定要删除以下记忆吗？此操作不可撤销。</p>
+    <p id="deleteContent" style="padding:12px;background:#f5f5f5;border-radius:8px;margin-bottom:16px;font-size:14px"></p>
+    <input type="hidden" id="deleteId">
+    <div class="modal-actions">
+      <button class="btn-cancel" id="btnCancelDelete">取消</button>
+      <button class="btn-danger" id="btnConfirmDelete">删除</button>
+    </div>
+  </div>
+</div>
+
+<footer class="footer">OnlyMemory v0.1.0 &mdash; Long-term memory for LLMs</footer>
+
+<script>
+// ===== State =====
+let memories = [];
+let currentSearch = '';
+let currentType = 'all';
+let searchTimer = null;
+
+// ===== API helpers =====
+const apiBase = '/api';
+
+async function api(path, opts = {}) {
+  const url = apiBase + path;
+  const config = { headers: { 'Content-Type': 'application/json' }, ...opts };
+  if (config.body && typeof config.body === 'object') config.body = JSON.stringify(config.body);
+  const res = await fetch(url, config);
+  return res.json();
+}
+
+// ===== Data loading =====
+async function loadMemories() {
+  let path = '/memories?limit=100';
+  if (currentType === 'pinned') path += '&type=all';
+  else if (currentType !== 'all') path += '&type=' + currentType;
+  if (currentSearch) path += '&search=' + encodeURIComponent(currentSearch);
+  const data = await api(path);
+  memories = data.memories || [];
+  renderMemories();
+  await loadStats();
+}
+
+async function loadStats() {
+  const s = await api('/stats');
+  document.getElementById('statTotal').textContent = s.activeCount ?? s.active ?? s.total ?? 0;
+  const all = await api('/memories?limit=999');
+  document.getElementById('statPinned').textContent = (all.memories || []).filter(m => m.pinned).length;
+  document.getElementById('statProject').textContent = s.project ?? s.projectId ?? '-';
+}
+
+// ===== Rendering =====
+function renderMemories() {
+  const c = document.getElementById('cardsContainer');
+  let list = memories;
+  if (currentType === 'pinned') list = list.filter(m => m.pinned);
+
+  if (!list.length) {
+    c.innerHTML = '<div class="empty-state"><div class="emoji">🧠</div><h3>暂无记忆</h3><p>点击 "+ 新建记忆" 或在对话中使用 remember 工具</p></div>';
+    return;
+  }
+  c.innerHTML = '';
+  list.forEach(m => c.appendChild(createCard(m)));
+}
+
+function createCard(m) {
+  const card = document.createElement('div');
+  card.className = 'card' + (m.pinned ? ' pinned' : '');
+  card.dataset.id = m.id;
+
+  const imp = m.importance || 0;
+  const pct = Math.round(imp * 100);
+  const lvl = pct >= 70 ? 'high' : pct >= 40 ? 'medium' : 'low';
+  const created = m.createdAt ? new Date(m.createdAt).toLocaleDateString('zh-CN') : '-';
+  const entities = (m.entities || []).join(', ') || '';
+
+  // Header
+  const header = document.createElement('div');
+  header.className = 'card-header';
+  const badge = document.createElement('span');
+  badge.className = 'type-badge ' + m.type;
+  badge.textContent = m.type;
+  header.appendChild(badge);
+  if (m.pinned) { const p = document.createElement('span'); p.className = 'pin-icon'; p.textContent = '📌'; header.appendChild(p); }
+  const impMini = document.createElement('span');
+  impMini.className = 'importance-mini';
+  impMini.textContent = pct + '%';
+  header.appendChild(impMini);
+
+  // Content
+  const content = document.createElement('div');
+  content.className = 'card-content';
+  content.textContent = m.content;
+
+  // Meta
+  const meta = document.createElement('div');
+  meta.className = 'card-meta';
+  const bar = document.createElement('div');
+  bar.className = 'importance-bar';
+  const fill = document.createElement('div');
+  fill.className = 'importance-fill ' + lvl;
+  fill.style.width = pct + '%';
+  bar.appendChild(fill);
+  meta.appendChild(bar);
+  const dateSpan = document.createElement('span');
+  dateSpan.textContent = created;
+  meta.appendChild(dateSpan);
+  const countSpan = document.createElement('span');
+  countSpan.textContent = '👁 ' + (m.accessCount || 0);
+  meta.appendChild(countSpan);
+  if (entities) { const eSpan = document.createElement('span'); eSpan.textContent = entities; meta.appendChild(eSpan); }
+
+  // Actions
+  const actions = document.createElement('div');
+  actions.className = 'card-actions';
+  const pinBtn = document.createElement('button');
+  pinBtn.className = 'action-btn pin';
+  pinBtn.textContent = m.pinned ? '取消置顶' : '📌 置顶';
+  const editBtn = document.createElement('button');
+  editBtn.className = 'action-btn edit';
+  editBtn.textContent = '✏️ 编辑';
+  const delBtn = document.createElement('button');
+  delBtn.className = 'action-btn delete';
+  delBtn.textContent = '🗑 删除';
+  actions.append(pinBtn, editBtn, delBtn);
+
+  card.append(header, content, meta, actions);
+
+  pinBtn.addEventListener('click', () => togglePin(m.id, m.pinned));
+  editBtn.addEventListener('click', () => openEdit(m));
+  delBtn.addEventListener('click', () => openDelete(m));
+
+  return card;
+}
+
+// ===== Actions =====
+async function togglePin(id, isPinned) {
+  await api(isPinned ? '/unpin/' + id : '/pin/' + id, { method: 'POST' });
+  toast(isPinned ? '已取消置顶' : '已置顶', 'success');
+  loadMemories();
+}
+
+function openEdit(m) {
+  document.getElementById('modalTitle').textContent = m ? '编辑记忆' : '新建记忆';
+  document.getElementById('editId').value = m ? m.id : '';
+  document.getElementById('editContent').value = m ? m.content : '';
+  document.getElementById('editImportance').value = m ? m.importance : 0.8;
+  document.getElementById('editType').value = m ? m.type : 'fact';
+  document.getElementById('editModal').classList.remove('hidden');
+}
+
+function openDelete(m) {
+  document.getElementById('deleteId').value = m.id;
+  document.getElementById('deleteContent').textContent = m.content;
+  document.getElementById('deleteModal').classList.remove('hidden');
+}
+
+function showToast(msg, type) {
+  const t = document.createElement('div');
+  t.className = 'toast ' + (type || 'info');
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 2000);
+}
+// alias
+const toast = showToast;
+
+// ===== Event Listeners =====
+document.getElementById('searchInput').addEventListener('input', e => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => { currentSearch = e.target.value.trim(); loadMemories(); }, 300);
+});
+
+document.querySelectorAll('.filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentType = btn.dataset.type;
+    loadMemories();
+  });
+});
+
+document.getElementById('btnAdd').addEventListener('click', () => openEdit(null));
+
+document.getElementById('btnCancelEdit').addEventListener('click', () => document.getElementById('editModal').classList.add('hidden'));
+
+document.getElementById('btnSaveEdit').addEventListener('click', async () => {
+  const id = document.getElementById('editId').value;
+  const content = document.getElementById('editContent').value.trim();
+  const importance = parseFloat(document.getElementById('editImportance').value) || 0.5;
+  const type = document.getElementById('editType').value;
+  if (!content) { toast('请输入内容', 'error'); return; }
+  if (id) {
+    await api('/memories/' + id, { method: 'POST', body: { content, importance, type } });
+    toast('已更新', 'success');
+  } else {
+    await api('/memories', { method: 'POST', body: { content, importance } });
+    toast('已创建', 'success');
+  }
+  document.getElementById('editModal').classList.add('hidden');
+  loadMemories();
+});
+
+document.getElementById('btnCancelDelete').addEventListener('click', () => document.getElementById('deleteModal').classList.add('hidden'));
+
+document.getElementById('btnConfirmDelete').addEventListener('click', async () => {
+  const id = document.getElementById('deleteId').value;
+  await api('/delete/' + id, { method: 'POST' });
+  document.getElementById('deleteModal').classList.add('hidden');
+  toast('已删除', 'success');
+  loadMemories();
+});
+
+// Close modals on overlay click
+document.querySelectorAll('.modal-overlay').forEach(el => {
+  el.addEventListener('click', e => { if (e.target === el) el.classList.add('hidden'); });
+});
+
+// ===== Init =====
+loadMemories();
+setInterval(loadStats, 30000);
+</script>
+</body>
+</html>

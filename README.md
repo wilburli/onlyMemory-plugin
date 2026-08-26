@@ -3,8 +3,11 @@
 零外部依赖的 LLM 长期记忆插件，专为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 设计。
 
 ---
-
+效果图
 ![alt text](image.png)
+
+记忆管理界面
+![alt text](image-1.png)
 
 ## 目录
 
@@ -15,6 +18,7 @@
 - [模块详解](#模块详解)
 - [配置参考](#配置参考)
 - [MCP 工具清单](#mcp-工具清单)
+- [Web 管理界面](#web-管理界面)
 - [二次开发指南](#二次开发指南)
 - [数据存储结构](#数据存储结构)
 - [常见问题](#常见问题)
@@ -25,6 +29,7 @@
 
 - **零外部依赖** — 不需要向量数据库、Redis、PostgreSQL 等外部服务
 - **SQLite + 纯 JS 向量检索** — sql.js（WASM）实现，单文件存储
+- **Web 管理界面** — 浏览器中查看、编辑、置顶、删除记忆
 - **多项目隔离** — 不同项目记忆完全独立
 - **MCP 标准协议** — 通过 `@deepseek-ai/dsh-mcp-client` 与 Harness 无缝集成
 - **模块化设计** — 每个子模块可独立替换和扩展
@@ -409,6 +414,22 @@ class MultiRecallRetriever {
 | `merger.ts` | `MemoryMerger` | `merge(store)` | bigram Jaccard 相似度去重合并 |
 | `cleaner.ts` | `MemoryCleaner` | `clean(store)` | 清理低于阈值的记忆，跳过置顶记忆 |
 
+### `src/web-server.ts` — Web 管理界面
+
+内置 HTTP 服务器，提供 REST API 和静态前端页面：
+
+```typescript
+class WebServer {
+  constructor(options: { engine: MemoryEngine; port?: number; host?: string })
+  start(): Promise<void>
+  stop(): Promise<void>
+  getUrl(): string
+}
+```
+
+与 MCP stdio 服务器共享同一个 MemoryEngine 实例，无额外数据库连接开销。
+前端页面位于 `web/index.html`，零外部依赖，纯 HTML/CSS/JS 实现。
+
 ---
 
 ## 配置参考
@@ -419,6 +440,7 @@ class MultiRecallRetriever {
 |------|--------|------|
 | `ONLYMEM_PROJECT` | `default` | 项目标识 |
 | `ONLYMEM_DATA_DIR` | `~/.onlymem` | 数据存储目录 |
+| `ONLYMEM_WEB_PORT`  | `3456` | Web 管理界面端口（0 = 禁用） |
 | `SQL_JS_WASM_PATH` | 自动探测 | sql.js WASM 文件路径 |
 
 ### Harness patch 配置
@@ -454,6 +476,45 @@ class MultiRecallRetriever {
 | `stats` | 无 | 记忆库统计 |
 | `export_memories` | `path: string` | 导出到 JSON 文件 |
 | `import_memories` | `path: string` | 从 JSON 导入 |
+
+---
+
+## Web 管理界面
+
+启动 Harness 后，Web 管理界面自动在 `http://127.0.0.1:3456` 开启。你可以在浏览器中：
+
+- **查看所有记忆** — 卡片式布局，显示类型、重要度、访问次数
+- **搜索和过滤** — 关键词搜索 + 按类型/置顶状态筛选
+- **新建记忆** — 手动添加记忆条目
+- **编辑记忆** — 修改内容、重要度、类型
+- **置顶/取消置顶** — 重要记忆防止衰减和自动清理
+- **删除记忆** — 删除不再需要的记忆
+
+### 配置端口
+
+```bash
+# 自定义端口
+dsh web --env ONLYMEM_WEB_PORT=8080
+
+# 禁用 Web 界面
+dsh web --env ONLYMEM_WEB_PORT=0
+```
+
+### REST API
+
+Web 服务器同时暴露 REST API，方便二次开发集成：
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/api/memories?limit=&type=&search=` | 查询记忆列表 |
+| `GET` | `/api/memories/:id` | 查看单条记忆 |
+| `GET` | `/api/stats` | 统计信息 |
+| `POST` | `/api/memories` | 创建记忆 `{content, importance}` |
+| `POST` | `/api/memories/:id` | 更新记忆 `{content?, importance?, type?}` |
+| `POST` | `/api/pin/:id` | 置顶 |
+| `POST` | `/api/unpin/:id` | 取消置顶 |
+| `POST` | `/api/delete/:id` | 删除 |
+| `POST` | `/api/forget` | 按关键词删除 `{query}` |
 
 ---
 

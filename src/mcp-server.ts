@@ -24,9 +24,9 @@ import { z } from 'zod';
 import { MemoryEngine } from './engine.js';
 import type { MemoryPluginConfig } from './config.js';
 
-export async function startMcpServer(configOverrides?: Partial<MemoryPluginConfig>): Promise<void> {
-  const engine = new MemoryEngine(configOverrides);
-  await engine.init();
+export async function startMcpServer(configOverrides?: Partial<MemoryPluginConfig>, externalEngine?: MemoryEngine): Promise<void> {
+  const engine = externalEngine ?? new MemoryEngine(configOverrides);
+  if (!externalEngine) await engine.init();
 
   const server = new McpServer(
     { name: 'only-memory', version: '0.1.0' },

@@ -17,6 +17,7 @@
   "files": [
     "dist",
     "bin",
+    "web",
     "cordis.patch.yml",
     "node_modules/sql.js/dist/sql-wasm.wasm"
   ],
