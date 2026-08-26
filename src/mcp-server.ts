@@ -123,6 +123,97 @@ export async function startMcpServer(configOverrides?: Partial<MemoryPluginConfi
   );
 
   // ================================================================ //
+  // 工具: get_memory - 查看单条记忆详情
+  // ================================================================ //
+  server.tool(
+    'get_memory',
+    'Get full details of a specific memory by its ID, including content, type, importance, entities, and timestamps.',
+    {
+      id: z.string().describe('The memory ID to look up'),
+    },
+    async ({ id }) => {
+      const mem = engine.getMemory(id);
+      if (!mem) {
+        return { content: [{ type: 'text', text: `Memory not found: ${id}` }] };
+      }
+      const lines = [
+        `ID: ${mem.id}`,
+        `Content: ${mem.content}`,
+        `Type: ${mem.type}`,
+        `Importance: ${mem.importance.toFixed(2)}`,
+        `Pinned: ${mem.pinned ? 'yes' : 'no'}`,
+        `Entities: ${mem.entities.join(', ') || 'none'}`,
+        `Access count: ${mem.accessCount}`,
+        `Created: ${mem.createdAt}`,
+        `Updated: ${mem.updatedAt}`,
+      ];
+      return { content: [{ type: 'text', text: lines.join('\n') }] };
+    },
+  );
+
+  // ================================================================ //
+  // 工具: update_memory - 编辑记忆内容
+  // ================================================================ //
+  server.tool(
+    'update_memory',
+    'Update an existing memory\'s content, importance, or type. Use this to correct mistakes or refine stored information.',
+    {
+      id: z.string().describe('The memory ID to update'),
+      content: z.string().optional().describe('New content text'),
+      importance: z.number().min(0).max(1).optional().describe('New importance score 0-1'),
+      type: z.enum(['fact', 'preference', 'event', 'behavior']).optional().describe('New memory type'),
+    },
+    async ({ id, content, importance, type }) => {
+      const updates: { content?: string; importance?: number; type?: string } = {};
+      if (content !== undefined) updates.content = content;
+      if (importance !== undefined) updates.importance = importance;
+      if (type !== undefined) updates.type = type;
+
+      const ok = engine.updateMemory(id, updates);
+      if (!ok) {
+        return { content: [{ type: 'text', text: `Failed to update memory: ${id} (not found or no changes)` }] };
+      }
+      return { content: [{ type: 'text', text: `Updated memory ${id}` }] };
+    },
+  );
+
+  // ================================================================ //
+  // 工具: pin_memory - 置顶记忆
+  // ================================================================ //
+  server.tool(
+    'pin_memory',
+    'Pin a memory to protect it from time decay and automatic cleanup. Pinned memories are always preserved.',
+    {
+      id: z.string().describe('The memory ID to pin'),
+    },
+    async ({ id }) => {
+      const ok = engine.pinMemory(id);
+      if (!ok) {
+        return { content: [{ type: 'text', text: `Failed to pin memory: ${id} (not found)` }] };
+      }
+      return { content: [{ type: 'text', text: `Pinned memory ${id}` }] };
+    },
+  );
+
+  // ================================================================ //
+  // 工具: unpin_memory - 取消置顶
+  // ================================================================ //
+  server.tool(
+    'unpin_memory',
+    'Unpin a previously pinned memory, allowing it to be affected by time decay and cleanup again.',
+    {
+      id: z.string().describe('The memory ID to unpin'),
+    },
+    async ({ id }) => {
+      const ok = engine.unpinMemory(id);
+      if (!ok) {
+        return { content: [{ type: 'text', text: `Failed to unpin memory: ${id} (not found)` }] };
+      }
+      return { content: [{ type: 'text', text: `Unpinned memory ${id}` }] };
+    },
+  );
+
+  // ================================================================ //
   // 工具: list_memories - 列出所有记忆
   // ================================================================ //
   server.tool(
@@ -138,7 +229,8 @@ export async function startMcpServer(configOverrides?: Partial<MemoryPluginConfi
       }
 
       const lines = memories.slice(0, limit).map((m) => {
-        return `- [${m.type}] ${m.content} (importance: ${m.importance.toFixed(2)})`;
+        const pin = m.pinned ? ' 📌' : '';
+        return `- [${m.type}] ${m.content} (importance: ${m.importance.toFixed(2)}, id: ${m.id})${pin}`;
       });
       lines.unshift(`Total: ${memories.length} memories (showing ${Math.min(limit, memories.length)}):\n`);
 

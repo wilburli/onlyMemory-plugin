@@ -134,6 +134,30 @@ export class MemoryEngine {
     return this.retriever.retrieve(query);
   }
 
+  /** 获取单条记忆详情 */
+  getMemory(id: string): Memory | null {
+    this.ensureInitialized();
+    return this.store.getMemory(id);
+  }
+
+  /** 更新记忆内容/重要度/类型 */
+  updateMemory(id: string, updates: { content?: string; importance?: number; type?: string }): boolean {
+    this.ensureInitialized();
+    return this.store.updateMemory(id, updates);
+  }
+
+  /** 置顶记忆（防止衰减和清理） */
+  pinMemory(id: string): boolean {
+    this.ensureInitialized();
+    return this.store.pinMemory(id);
+  }
+
+  /** 取消置顶 */
+  unpinMemory(id: string): boolean {
+    this.ensureInitialized();
+    return this.store.unpinMemory(id);
+  }
+
   /** 获取所有活跃记忆 */
   getAllMemories(): Memory[] {
     this.ensureInitialized();

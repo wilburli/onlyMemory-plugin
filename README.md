@@ -290,7 +290,11 @@ interface MemoryPluginConfig {
 | `init()` | `async (): Promise<void>` | 异步初始化（加载 WASM、数据库、向量） |
 | `remember()` | `(content: string, importance?: number): Promise<Memory>` | 显式存储一条记忆 |
 | `forget()` | `(query: string): Promise<number>` | 按关键词删除记忆，返回删除数 |
-| `search()` | `(query: string, limit?: number): Promise<RetrievalResult[]>` | 搜索记忆 |
+| `search()` | `(query: string): RetrievalResult[]` | 搜索记忆 |
+| `getMemory()` | `(id: string): Memory \| null` | 获取单条记忆详情 |
+| `updateMemory()` | `(id, updates): boolean` | 编辑记忆内容/重要度/类型 |
+| `pinMemory()` | `(id: string): boolean` | 置顶记忆（防止衰减和清理） |
+| `unpinMemory()` | `(id: string): boolean` | 取消置顶 |
 | `getAllMemories()` | `(): Memory[]` | 获取所有活跃记忆 |
 | `getStats()` | `(): object` | 获取统计信息 |
 | `onUserMessage()` | `(text: string): Promise<string>` | 处理用户消息，返回相关记忆上下文 |
@@ -401,9 +405,9 @@ class MultiRecallRetriever {
 
 | 模块 | 类 | 核心方法 | 说明 |
 |------|-----|----------|------|
-| `decay.ts` | `DecayManager` | `decayedScore(score, createdAt)` / `applyDecay(store)` | 指数衰减，半衰期可配 |
+| `decay.ts` | `DecayManager` | `decayedScore(score, createdAt)` / `applyDecay(store)` | 指数衰减，半衰期可配，跳过置顶记忆 |
 | `merger.ts` | `MemoryMerger` | `merge(store)` | bigram Jaccard 相似度去重合并 |
-| `cleaner.ts` | `MemoryCleaner` | `clean(store)` | 清理低于阈值的记忆 |
+| `cleaner.ts` | `MemoryCleaner` | `clean(store)` | 清理低于阈值的记忆，跳过置顶记忆 |
 
 ---
 
@@ -435,15 +439,19 @@ class MultiRecallRetriever {
 
 ## MCP 工具清单
 
-安装后 Harness 自动发现 7 个工具（前缀 `mcp__only_memory__`）：
+安装后 Harness 自动发现 11 个工具（前缀 `mcp__only_memory__`）：
 
 | 工具 | 参数 | 说明 |
 |------|------|------|
 | `remember` | `content: string`, `importance?: number` | 记住一条信息 |
-| `forget` | `query: string` | 按关键词遗忘 |
 | `search` | `query: string`, `limit?: number` | 搜索记忆 |
+| `get_memory` | `id: string` | 查看单条记忆详情（含 ID、类型、重要度、置顶状态） |
+| `update_memory` | `id`, `content?`, `importance?`, `type?` | 编辑记忆内容/重要度/类型 |
+| `pin_memory` | `id: string` | 置顶记忆（防止衰减和自动清理） |
+| `unpin_memory` | `id: string` | 取消置顶 |
+| `list_memories` | `limit?: number` | 列出所有记忆（📌 表示置顶） |
+| `forget` | `query: string` | 按关键词遗忘 |
 | `stats` | 无 | 记忆库统计 |
-| `list_memories` | `limit?: number` | 列出所有记忆 |
 | `export_memories` | `path: string` | 导出到 JSON 文件 |
 | `import_memories` | `path: string` | 从 JSON 导入 |
 
@@ -596,6 +604,7 @@ engine.close();
 | | `importance REAL` | 重要性分数 0~1 |
 | | `embedding BLOB` | Float32Array 向量 |
 | | `status TEXT` | active/archived/deleted |
+| | `pinned INTEGER` | 0=普通, 1=置顶（防衰减和清理） |
 | | `access_count INTEGER` | 访问计数 |
 | | `created_at TEXT` | 创建时间 |
 | `memory_relations` | `from_id`, `to_id`, `relation_type` | 记忆间关系 |

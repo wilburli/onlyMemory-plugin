@@ -20,12 +20,14 @@ export class DecayManager {
     return importance * Math.exp(-days / this.halfLifeDays);
   }
 
-  /** 对所有活跃记忆执行衰减 */
+  /** 对所有活跃记忆执行衰减（跳过置顶记忆） */
   applyDecay(store: SqliteStore): number {
     const memories = store.getAllActive();
+    const pinnedIds = store.getPinnedIds();
     let updated = 0;
 
     for (const mem of memories) {
+      if (pinnedIds.has(mem.id)) continue; // 置顶记忆不衰减
       const newScore = this.decayedScore(mem.importance, mem.createdAt);
       if (Math.abs(newScore - mem.importance) > 0.01) {
         store.updateImportance(mem.id, newScore);

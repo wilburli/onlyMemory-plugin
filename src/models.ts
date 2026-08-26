@@ -38,6 +38,7 @@ export interface Memory {
   importance: number;       // 0.0 ~ 1.0
   embedding: Float32Array | null;
   status: MemoryStatus;
+  pinned: boolean;
   accessCount: number;
   lastAccessed: string;     // ISO datetime
   createdAt: string;        // ISO datetime
@@ -88,6 +89,7 @@ export function createMemory(input: CreateMemoryInput): Memory {
     importance: Math.min(1.0, Math.max(0.0, input.importance)),
     embedding: input.embedding,
     status: MemoryStatus.Active,
+    pinned: false,
     accessCount: 0,
     lastAccessed: now,
     createdAt: now,

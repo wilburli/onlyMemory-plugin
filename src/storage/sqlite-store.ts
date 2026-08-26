@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS memories (
   importance    REAL DEFAULT 0.5,
   embedding     BLOB,
   status        TEXT DEFAULT 'active',
+  pinned        INTEGER DEFAULT 0,
   access_count  INTEGER DEFAULT 0,
   last_accessed TEXT,
   created_at    TEXT DEFAULT (datetime('now')),
@@ -81,6 +82,10 @@ export class SqliteStore {
 
     // 执行初始化 SQL
     this.db.run(INIT_SQL);
+
+    // 兼容旧数据库：添加 pinned 列（已存在则忽略错误）
+    try { this.db.run('ALTER TABLE memories ADD COLUMN pinned INTEGER DEFAULT 0'); } catch { /* 列已存在 */ }
+
     this.save();
   }
 
@@ -127,9 +132,9 @@ export class SqliteStore {
 
     this.db.run(
       `INSERT OR REPLACE INTO memories
-       (id, content, type, entities, importance, embedding, status,
+       (id, content, type, entities, importance, embedding, status, pinned,
         access_count, last_accessed, created_at, updated_at, source_session)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         mem.id,
         mem.content,
@@ -138,6 +143,7 @@ export class SqliteStore {
         mem.importance,
         embeddingBlob,
         mem.status,
+        mem.pinned ? 1 : 0,
         mem.accessCount,
         mem.lastAccessed,
         mem.createdAt,
@@ -167,6 +173,49 @@ export class SqliteStore {
       [importance, id],
     );
     this.markDirty();
+  }
+
+  /** 更新记忆内容 */
+  updateMemory(id: string, updates: { content?: string; importance?: number; type?: string }): boolean {
+    if (!this.db) return false;
+    const sets: string[] = [];
+    const params: Array<string | number> = [];
+    if (updates.content !== undefined) { sets.push('content = ?'); params.push(updates.content); }
+    if (updates.importance !== undefined) { sets.push('importance = ?'); params.push(updates.importance); }
+    if (updates.type !== undefined) { sets.push('type = ?'); params.push(updates.type); }
+    if (sets.length === 0) return false;
+    sets.push("updated_at = datetime('now')");
+    params.push(id);
+    this.db.run(`UPDATE memories SET ${sets.join(', ')} WHERE id = ?`, params);
+    const changes = this.db.getRowsModified();
+    if (changes > 0) this.markDirty();
+    return changes > 0;
+  }
+
+  /** 置顶记忆 */
+  pinMemory(id: string): boolean {
+    if (!this.db) return false;
+    this.db.run("UPDATE memories SET pinned = 1, updated_at = datetime('now') WHERE id = ? AND status = 'active'", [id]);
+    const changes = this.db.getRowsModified();
+    if (changes > 0) this.markDirty();
+    return changes > 0;
+  }
+
+  /** 取消置顶 */
+  unpinMemory(id: string): boolean {
+    if (!this.db) return false;
+    this.db.run('UPDATE memories SET pinned = 0, updated_at = datetime(?) WHERE id = ?', [new Date().toISOString(), id]);
+    const changes = this.db.getRowsModified();
+    if (changes > 0) this.markDirty();
+    return changes > 0;
+  }
+
+  /** 获取所有置顶记忆 ID */
+  getPinnedIds(): Set<string> {
+    if (!this.db) return new Set();
+    const results = this.db.exec("SELECT id FROM memories WHERE pinned = 1 AND status = 'active'");
+    if (results.length === 0) return new Set();
+    return new Set(results[0].values.map((row: unknown[]) => row[0] as string));
   }
 
   /** 增加访问计数 */
@@ -344,6 +393,7 @@ function rowToMemory(columns: string[], row: unknown[]): Memory {
     importance: (obj.importance as number) ?? 0.5,
     embedding,
     status: (obj.status as MemoryStatus) ?? 'active',
+    pinned: ((obj.pinned as number) ?? 0) === 1,
     accessCount: (obj.access_count as number) ?? 0,
     lastAccessed: (obj.last_accessed as string) ?? new Date().toISOString(),
     createdAt: (obj.created_at as string) ?? new Date().toISOString(),
