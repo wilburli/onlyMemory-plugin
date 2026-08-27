@@ -102,6 +102,7 @@ export class WebServer {
         if (path === '/tags') return this.getAllTags(res);
         if (path.startsWith('/tags/')) return this.filterByTag(decodeURIComponent(path.slice(6)), res);
         if (path.startsWith('/links/')) return this.getLinks(path.slice(7), res);
+        if (path === '/config') return this.getConfig(res);
       }
 
       // POST routes
@@ -122,6 +123,8 @@ export class WebServer {
         if (path.startsWith('/unlink/')) return this.unlinkMemories(path.slice(8), body, res);
         if (path === '/maintenance') return this.runMaintenance(res);
         if (path === '/import') return this.importMemories(body, res);
+        if (path === '/summarize') return this.summarizeMemories(body, res);
+        if (path === '/batch') return this.batchOperation(body, res);
       }
 
       return this.json(res, { error: 'Not Found' }, 404);
@@ -140,6 +143,10 @@ export class WebServer {
     const search = params.get('search');
     const scope = (params.get('scope') ?? 'workspace') as 'workspace' | 'session' | 'all';
     const sessionId = params.get('sessionId') ?? undefined;
+    const sort = (params.get('sort') ?? 'importance') as 'importance' | 'created' | 'updated' | 'accessCount';
+    const order = (params.get('order') ?? 'desc') as 'asc' | 'desc';
+    const dateFrom = params.get('dateFrom');
+    const dateTo = params.get('dateTo');
     const limit = parseInt(params.get('limit') ?? '100', 10);
 
     let memories: Memory[];
@@ -167,10 +174,27 @@ export class WebServer {
       memories = memories.filter((m) => m.type === type);
     }
 
-    // pinned first, then by importance desc
+    // 日期范围过滤
+    if (dateFrom) {
+      const from = new Date(dateFrom).getTime();
+      memories = memories.filter((m) => new Date(m.createdAt).getTime() >= from);
+    }
+    if (dateTo) {
+      const to = new Date(dateTo).getTime();
+      memories = memories.filter((m) => new Date(m.createdAt).getTime() <= to);
+    }
+
+    // 排序：先 pinned first，再按指定字段
     memories.sort((a, b) => {
       if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-      return b.importance - a.importance;
+      let cmp = 0;
+      switch (sort) {
+        case 'created':   cmp = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(); break;
+        case 'updated':   cmp = new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime(); break;
+        case 'accessCount': cmp = (a.accessCount ?? 0) - (b.accessCount ?? 0); break;
+        default:          cmp = a.importance - b.importance;
+      }
+      return order === 'desc' ? -cmp : cmp;
     });
 
     memories = memories.slice(0, limit);
@@ -288,6 +312,63 @@ export class WebServer {
   private runMaintenance(res: import('node:http').ServerResponse) {
     const result = this.engine.runMaintenanceNow();
     this.json(res, { ok: true, ...result });
+  }
+
+  private async summarizeMemories(body: Record<string, unknown>, res: import('node:http').ServerResponse) {
+    if (!this.engine.hasSummarizer()) {
+      return this.json(res, { error: '摘要功能未启用' }, 400);
+    }
+    try {
+      const maxGroups = (body.maxGroups as number) ?? 3;
+      const result = await this.engine.summarizeMemories(maxGroups);
+      this.json(res, { ok: true, ...result });
+    } catch (err) {
+      this.json(res, { error: (err as Error).message }, 500);
+    }
+  }
+
+  private async batchOperation(body: Record<string, unknown>, res: import('node:http').ServerResponse) {
+    const action = body.action as string;
+    const ids = body.ids as string[];
+    if (!action || !ids || !Array.isArray(ids) || ids.length === 0) {
+      return this.json(res, { error: 'action and ids[] are required' }, 400);
+    }
+
+    let affected = 0;
+    switch (action) {
+      case 'delete':
+        for (const id of ids) { if (this.engine.deleteMemory(id)) affected++; }
+        break;
+      case 'pin':
+        for (const id of ids) { if (this.engine.pinMemory(id)) affected++; }
+        break;
+      case 'unpin':
+        for (const id of ids) { if (this.engine.unpinMemory(id)) affected++; }
+        break;
+      case 'tag': {
+        const tag = body.tag as string;
+        if (!tag) return this.json(res, { error: 'tag is required for batch tag operation' }, 400);
+        for (const id of ids) { if (this.engine.addTag(id, tag)) affected++; }
+        break;
+      }
+      default:
+        return this.json(res, { error: `Unknown action: ${action}. Use: delete, pin, unpin, tag` }, 400);
+    }
+
+    this.json(res, { ok: true, action, affected, total: ids.length });
+  }
+
+  private getConfig(res: import('node:http').ServerResponse) {
+    const config = this.engine.getConfig();
+    const stats = this.engine.getStats();
+    this.json(res, {
+      hasSummarizer: this.engine.hasSummarizer(),
+      maxActiveMemories: config.maxActiveMemories,
+      maxContextTokens: config.maxContextTokens,
+      summarizerBackend: config.summarizerBackend,
+      embeddingBackend: config.embeddingBackend,
+      ...stats,
+    });
   }
 
   private exportMemories(res: import('node:http').ServerResponse) {

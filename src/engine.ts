@@ -19,6 +19,7 @@ import { DecayManager } from './maintenance/decay.js';
 import { MemoryMerger } from './maintenance/merger.js';
 import { MemoryCleaner } from './maintenance/cleaner.js';
 import { createEmbeddingProvider, type EmbeddingProvider } from './embedding/embedding-provider.js';
+import { createSummarizerProvider, type SummarizerProvider } from './summarizer/summarizer-provider.js';
 import * as fs from 'node:fs';
 
 const EXPORT_VERSION = '1.0';
@@ -36,6 +37,7 @@ export class MemoryEngine {
   private merger: MemoryMerger;
   private cleaner: MemoryCleaner;
   private embeddingProvider: EmbeddingProvider | null = null;
+  private summarizerProvider: SummarizerProvider | null = null;
 
   private currentSessionId: string | null = null;
   private sessionUserMsgs: string[] = [];
@@ -68,6 +70,12 @@ export class MemoryEngine {
     this.embeddingProvider = await createEmbeddingProvider(this.config);
     if (this.embeddingProvider) {
       console.log(`[OnlyMemory] Embedding 已启用: ${this.config.embeddingBackend} / ${this.config.embeddingModel}`);
+    }
+
+    // 初始化 LLM 摘要提供者（可选）
+    this.summarizerProvider = createSummarizerProvider(this.config);
+    if (this.summarizerProvider) {
+      console.log(`[OnlyMemory] 摘要已启用: ${this.config.summarizerBackend}`);
     }
 
     this.retriever = new MultiRecallRetriever(
@@ -496,6 +504,7 @@ export class MemoryEngine {
       try {
         this.merger.merge(this.store);
         this.cleaner.clean(this.store);
+        this.enforceCapacity();
         this.store.flush();
       } catch {
         // 自动维护失败不影响主流程
@@ -503,16 +512,141 @@ export class MemoryEngine {
     }
   }
 
-  /** 公开接口：手动触发完整维护（衰减 + 合并 + 清理），返回统计信息 */
-  runMaintenanceNow(): { decayed: number; merged: number; cleaned: number; active: number } {
+  /** 公开接口：手动触发完整维护（衰减 + 合并 + 清理 + 容量淘汰），返回统计信息 */
+  runMaintenanceNow(): { decayed: number; merged: number; cleaned: number; evicted: number; active: number } {
     this.ensureInitialized();
-    const before = this.store.getActiveCount();
     const decayed = this.decay.applyDecay(this.store);
     const merged = this.merger.merge(this.store);
     const cleaned = this.cleaner.clean(this.store);
+    const evicted = this.enforceCapacity();
     this.store.flush();
     this.writeCounter = 0;
     const active = this.store.getActiveCount();
-    return { decayed, merged, cleaned, active };
+    return { decayed, merged, cleaned, evicted, active };
+  }
+
+  /** 是否已配置摘要提供者 */
+  hasSummarizer(): boolean {
+    return this.summarizerProvider !== null;
+  }
+
+  /** 获取当前配置（只读） */
+  getConfig(): MemoryPluginConfig {
+    return this.config;
+  }
+
+  /**
+   * 摘要压缩记忆：按实体相似度分组，将每组记忆压缩为一条摘要，原始记忆归档。
+   * @param maxGroups 最多处理几组（默认 3）
+   * @returns 摘要统计
+   */
+  async summarizeMemories(maxGroups: number = 3): Promise<{ summarized: number; archived: number; groups: number }> {
+    this.ensureInitialized();
+    if (!this.summarizerProvider) {
+      throw new Error('摘要功能未启用，请配置 summarizerBackend 和对应的 API Key');
+    }
+
+    const allMemories = this.store.getAllActive();
+    const pinnedIds = this.store.getPinnedIds();
+    // 只处理非置顶记忆，按重要度升序（优先压缩低分记忆）
+    const candidates = allMemories
+      .filter((m) => !pinnedIds.has(m.id))
+      .sort((a, b) => a.importance - b.importance);
+
+    if (candidates.length < 3) {
+      return { summarized: 0, archived: 0, groups: 0 };
+    }
+
+    // 按实体聚类分组
+    const groups = this.clusterByEntity(candidates);
+    let summarized = 0;
+    let archived = 0;
+    let groupCount = 0;
+
+    for (const group of groups) {
+      if (groupCount >= maxGroups) break;
+      if (group.length < 3) continue; // 太少的不合并
+
+      const texts = group.map((m) => m.content);
+      const summary = await this.summarizerProvider.summarize(texts);
+      if (!summary) continue;
+
+      // 计算平均重要度
+      const avgImportance = group.reduce((s, m) => s + m.importance, 0) / group.length;
+      // 合并所有实体
+      const allEntities = [...new Set(group.flatMap((m) => m.entities))];
+
+      // 创建摘要记忆
+      const mem = createMemory({
+        content: summary,
+        type: MemoryType.Fact,
+        entities: allEntities,
+        importance: Math.min(avgImportance + 0.1, 1.0), // 摘要略加重要度
+        embedding: this.embeddingProvider ? await this.embeddingProvider.embed(summary) : null,
+        sourceSession: this.currentSessionId,
+      });
+      this.store.insertMemory(mem);
+      if (mem.embedding) this.vectorStore.add(mem.id, mem.embedding);
+      summarized++;
+
+      // 归档原始记忆
+      for (const m of group) {
+        if (this.store.archiveMemory(m.id)) archived++;
+      }
+      groupCount++;
+    }
+
+    if (summarized > 0) this.store.flush();
+    return { summarized, archived, groups: groupCount };
+  }
+
+  /** 按实体聚类：两条记忆共享至少一个实体即归入同组 */
+  private clusterByEntity(memories: Memory[]): Memory[][] {
+    const visited = new Set<string>();
+    const groups: Memory[][] = [];
+
+    for (let i = 0; i < memories.length; i++) {
+      if (visited.has(memories[i].id)) continue;
+      const group: Memory[] = [memories[i]];
+      visited.add(memories[i].id);
+      const groupEntities = new Set(memories[i].entities);
+
+      for (let j = i + 1; j < memories.length; j++) {
+        if (visited.has(memories[j].id)) continue;
+        const hasShared = memories[j].entities.some((e) => groupEntities.has(e));
+        if (hasShared) {
+          group.push(memories[j]);
+          visited.add(memories[j].id);
+          memories[j].entities.forEach((e) => groupEntities.add(e));
+        }
+      }
+      groups.push(group);
+    }
+    return groups;
+  }
+
+  /** 容量淘汰：活跃记忆超限时归档最低分的非置顶记忆 */
+  private enforceCapacity(): number {
+    const limit = this.config.maxActiveMemories;
+    if (limit <= 0) return 0;
+
+    const active = this.store.getActiveCount();
+    if (active <= limit) return 0;
+
+    const pinnedIds = this.store.getPinnedIds();
+    const allMemories = this.store.getAllActive();
+    // 只淘汰非置顶记忆，按重要度升序
+    const candidates = allMemories
+      .filter((m) => !pinnedIds.has(m.id))
+      .sort((a, b) => a.importance - b.importance);
+
+    const toEvict = active - limit;
+    let evicted = 0;
+    for (const mem of candidates) {
+      if (evicted >= toEvict) break;
+      if (this.store.archiveMemory(mem.id)) evicted++;
+    }
+    if (evicted > 0) this.store.flush();
+    return evicted;
   }
 }

@@ -32,6 +32,8 @@ export interface MemoryPluginConfig {
   embeddingDim: number;
   /** LLM 摘要后端 */
   summarizerBackend: 'none' | 'openai' | 'dashscope' | 'deepseek';
+  /** 活跃记忆上限（0 = 不限制），超限时自动归档低分记忆 */
+  maxActiveMemories: number;
 }
 
 /** 默认配置 */
@@ -50,6 +52,7 @@ export const DEFAULT_CONFIG: MemoryPluginConfig = {
   embeddingModel: 'paraphrase-multilingual-MiniLM-L12-v2',
   embeddingDim: 384,
   summarizerBackend: 'none',
+  maxActiveMemories: 500,
 };
 
 /** 合并配置 */

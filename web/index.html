@@ -143,6 +143,53 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica N
 .scope-session-select:focus{border-color:#1976d2}
 .scope-workspace-badge{display:inline-flex;align-items:center;gap:3px;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:700;background:#e3f2fd;color:#1565c0;border:1px solid #90caf9;letter-spacing:.2px}
 .scope-hint{font-size:11px;color:#bdbdbd;margin-left:4px}
+
+/* Sort dropdown */
+.sort-group{display:flex;align-items:center;gap:4px}
+.sort-group label{font-size:12px;color:#9e9e9e;white-space:nowrap}
+.sort-select{padding:6px 10px;border:2px solid #e0e0e0;border-radius:8px;font-size:12px;outline:none;cursor:pointer;background:#fff;color:#555;transition:border-color .2s}
+.sort-select:focus{border-color:#1976d2}
+
+/* Batch mode */
+.batch-bar{position:sticky;top:0;z-index:50;max-width:1200px;margin:0 auto;padding:10px 24px;background:linear-gradient(135deg,#1565c0,#1976d2);border-radius:0 0 12px 12px;display:none;align-items:center;gap:12px;box-shadow:0 2px 8px rgba(0,0,0,.15);color:#fff}
+.batch-bar.visible{display:flex}
+.batch-count{font-size:14px;font-weight:600;white-space:nowrap}
+.batch-btn{padding:6px 14px;border:1px solid rgba(255,255,255,.4);border-radius:6px;background:rgba(255,255,255,.15);color:#fff;cursor:pointer;font-size:12px;font-weight:500;transition:all .15s}
+.batch-btn:hover{background:rgba(255,255,255,.3)}
+.batch-btn.danger{border-color:#ef9a9a;color:#ffcdd2}
+.batch-btn.danger:hover{background:rgba(244,67,54,.3)}
+.card-checkbox{position:absolute;top:12px;left:12px;width:18px;height:18px;cursor:pointer;accent-color:#1976d2;display:none;z-index:2}
+.batch-mode .card-checkbox{display:block}
+.batch-mode .card{padding-left:36px}
+
+/* Advanced search panel */
+.advanced-search{max-width:1200px;margin:0 auto;padding:0 24px;display:none}
+.advanced-search.visible{display:block}
+.advanced-panel{background:#fff;border-radius:10px;padding:14px 18px;border:1px solid #e0e0e0;display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end}
+.adv-field{display:flex;flex-direction:column;gap:4px}
+.adv-field label{font-size:11px;color:#9e9e9e;font-weight:600;text-transform:uppercase}
+.adv-field input{padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:12px;outline:none}
+.adv-field input:focus{border-color:#1976d2}
+.adv-toggle{font-size:12px;color:#1976d2;cursor:pointer;text-decoration:underline;white-space:nowrap;background:none;border:none}
+.adv-apply{padding:6px 14px;background:#1976d2;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600}
+
+/* Detail panel (slide-in right) */
+.detail-overlay{position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:900;display:none;opacity:0;transition:opacity .25s}
+.detail-overlay.visible{display:block;opacity:1}
+.detail-panel{position:fixed;top:0;right:-480px;width:460px;max-width:90vw;height:100vh;background:#fff;z-index:950;box-shadow:-4px 0 20px rgba(0,0,0,.1);transition:right .3s ease;overflow-y:auto;display:flex;flex-direction:column}
+.detail-panel.visible{right:0}
+.detail-header{padding:20px;border-bottom:1px solid #eee;display:flex;align-items:center;justify-content:space-between}
+.detail-header h3{font-size:16px;color:#333}
+.detail-close{border:none;background:none;font-size:20px;cursor:pointer;color:#999;padding:4px}
+.detail-close:hover{color:#333}
+.detail-body{flex:1;padding:20px;display:flex;flex-direction:column;gap:16px}
+.detail-section{display:flex;flex-direction:column;gap:6px}
+.detail-label{font-size:11px;color:#9e9e9e;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+.detail-value{font-size:14px;color:#333;line-height:1.6;word-break:break-word}
+.detail-tags{display:flex;gap:6px;flex-wrap:wrap}
+.detail-relations{display:flex;flex-direction:column;gap:8px}
+.detail-rel-item{padding:8px 12px;background:#f9f9f9;border-radius:8px;font-size:13px;display:flex;gap:8px;align-items:center}
+.detail-actions{padding:16px 20px;border-top:1px solid #eee;display:flex;gap:8px;flex-wrap:wrap}
 </style>
 </head>
 <body>
@@ -171,6 +218,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica N
 
 <div class="toolbar">
   <div class="search-box"><input type="text" id="searchInput" placeholder="搜索记忆..."></div>
+  <button class="adv-toggle" id="btnAdvToggle" title="展开/收起高级搜索">🔎 高级搜索</button>
   <div class="filter-group">
     <button class="filter-btn active" data-type="all">全部</button>
     <button class="filter-btn" data-type="fact">Fact</button>
@@ -179,14 +227,57 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica N
     <button class="filter-btn" data-type="behavior">Behavior</button>
     <button class="filter-btn" data-type="pinned">📌 Pinned</button>
   </div>
+  <div class="sort-group">
+    <label>排序:</label>
+    <select id="sortSelect" class="sort-select">
+      <option value="importance-desc">重要度 ↓</option>
+      <option value="importance-asc">重要度 ↑</option>
+      <option value="created-desc">创建时间 ↓</option>
+      <option value="created-asc">创建时间 ↑</option>
+      <option value="updated-desc">更新时间 ↓</option>
+      <option value="updated-asc">更新时间 ↑</option>
+      <option value="accessCount-desc">访问次数 ↓</option>
+      <option value="accessCount-asc">访问次数 ↑</option>
+    </select>
+  </div>
   <button class="btn-add" id="btnAdd">+ 新建记忆</button>
+  <button class="action-btn" id="btnBatchMode" title="切换批量操作模式">☑️ 批量</button>
   <button class="action-btn" id="btnMaintenance" title="运行维护：衰减 + 合并 + 清理">🔧 维护</button>
   <button class="action-btn" id="btnExport" title="导出所有记忆为 JSON">📤 导出</button>
   <button class="action-btn" id="btnImport" title="从 JSON 文件导入记忆">📥 导入</button>
   <input type="file" id="importFileInput" accept=".json" style="display:none">
 </div>
 
-<main class="content">
+<!-- Advanced Search Panel -->
+<div id="advancedSearch" class="advanced-search">
+  <div class="advanced-panel">
+    <div class="adv-field">
+      <label>创建日期 从</label>
+      <input type="date" id="dateFrom">
+    </div>
+    <div class="adv-field">
+      <label>创建日期 到</label>
+      <input type="date" id="dateTo">
+    </div>
+    <div class="adv-field">
+      <label>关键词搜索</label>
+      <input type="text" id="advSearchInput" placeholder="搜索内容...">
+    </div>
+    <button class="adv-apply" id="btnAdvApply">应用筛选</button>
+    <button class="adv-toggle" id="btnAdvClear">清除</button>
+  </div>
+</div>
+
+<main class="content" id="mainContent">
+  <!-- Batch Action Bar -->
+  <div id="batchBar" class="batch-bar">
+    <span class="batch-count" id="batchCount">已选 0 条</span>
+    <button class="batch-btn" id="batchPin">📌 置顶</button>
+    <button class="batch-btn" id="batchUnpin">📎 取消置顶</button>
+    <button class="batch-btn" id="batchTag">🏷️ 打标签</button>
+    <button class="batch-btn danger" id="batchDelete">🗑 删除</button>
+    <button class="batch-btn" id="batchCancel">✕ 取消选择</button>
+  </div>
   <div id="tagFilterBar" class="tag-filter-bar" style="display:none"></div>
   <div id="cardsContainer" class="cards"><div class="loading">加载中...</div></div>
 </main>
@@ -284,6 +375,17 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica N
   </div>
 </div>
 
+<!-- Detail Panel -->
+<div id="detailOverlay" class="detail-overlay"></div>
+<div id="detailPanel" class="detail-panel">
+  <div class="detail-header">
+    <h3>📝 记忆详情</h3>
+    <button class="detail-close" id="detailClose">&times;</button>
+  </div>
+  <div class="detail-body" id="detailBody"></div>
+  <div class="detail-actions" id="detailActions"></div>
+</div>
+
 <footer class="footer">OnlyMemory v0.1.0 &mdash; Long-term memory for LLMs</footer>
 
 <script>
@@ -296,6 +398,12 @@ let currentScope = 'workspace'; // 'workspace' | 'session' | 'all'
 let currentSessionId = null;    // null = 使用活跃会话
 let currentWorkspace = null;    // 当前工作区名称，initScopeBar 中填充
 let searchTimer = null;
+let currentSort = 'importance';  // 'importance' | 'created' | 'updated' | 'accessCount'
+let currentOrder = 'desc';      // 'asc' | 'desc'
+let currentDateFrom = '';       // 高级搜索日期从
+let currentDateTo = '';         // 高级搜索日期到
+let batchMode = false;          // 批量操作模式
+let selectedIds = new Set();    // 批量操作选中的 ID
 
 // ===== API helpers =====
 const apiBase = '/api';
@@ -315,13 +423,15 @@ async function loadMemories() {
     const data = await api('/tags/' + encodeURIComponent(currentTag));
     memories = data.memories || [];
   } else {
-    let path = '/memories?limit=200&scope=' + currentScope;
+    let path = '/memories?limit=200&scope=' + currentScope + '&sort=' + currentSort + '&order=' + currentOrder;
     if (currentScope === 'session' && currentSessionId) {
       path += '&sessionId=' + encodeURIComponent(currentSessionId);
     }
     if (currentType === 'pinned') path += '&type=all';
     else if (currentType !== 'all') path += '&type=' + currentType;
     if (currentSearch && currentScope !== 'all') path += '&search=' + encodeURIComponent(currentSearch);
+    if (currentDateFrom) path += '&dateFrom=' + encodeURIComponent(currentDateFrom);
+    if (currentDateTo) path += '&dateTo=' + encodeURIComponent(currentDateTo);
     const data = await api(path);
     memories = data.memories || [];
   }
@@ -441,8 +551,13 @@ function updateScopeHint() {
 // ===== Rendering =====
 function renderMemories() {
   const c = document.getElementById('cardsContainer');
+  const mainContent = document.getElementById('mainContent');
   let list = memories;
   if (currentType === 'pinned') list = list.filter(m => m.pinned);
+
+  // 批量模式样式
+  if (batchMode) mainContent.classList.add('batch-mode');
+  else mainContent.classList.remove('batch-mode');
 
   if (!list.length) {
     c.innerHTML = '<div class="empty-state"><div class="emoji">🧠</div><h3>暂无记忆</h3><p>点击 "+ 新建记忆" 或在对话中使用 remember 工具</p></div>';
@@ -456,6 +571,19 @@ function createCard(m) {
   const card = document.createElement('div');
   card.className = 'card' + (m.pinned ? ' pinned' : '');
   card.dataset.id = m.id;
+
+  // 批量模式复选框
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.className = 'card-checkbox';
+  checkbox.checked = selectedIds.has(m.id);
+  checkbox.addEventListener('change', (e) => {
+    e.stopPropagation();
+    if (checkbox.checked) selectedIds.add(m.id);
+    else selectedIds.delete(m.id);
+    updateBatchCount();
+  });
+  card.appendChild(checkbox);
 
   const imp = m.importance || 0;
   const pct = Math.round(imp * 100);
@@ -487,6 +615,8 @@ function createCard(m) {
   const content = document.createElement('div');
   content.className = 'card-content';
   content.textContent = m.content;
+  content.style.cursor = 'pointer';
+  content.addEventListener('click', () => openDetail(m.id));
 
   // Meta
   const meta = document.createElement('div');
@@ -743,7 +873,7 @@ document.getElementById('btnMaintenance').addEventListener('click', async () => 
   if (!confirm('确认运行记忆库维护？\n\n将执行：时间衰减 + 合并重复 + 清理低分')) return;
   const res = await api('/maintenance', { method: 'POST' });
   if (res.error) { toast(res.error, 'error'); return; }
-  toast(`维护完成: 衰减${res.decayed} 合并${res.merged} 清理${res.cleaned} 剩余${res.active}`, 'success');
+  toast(`维护完成: 衰减${res.decayed} 合并${res.merged} 清理${res.cleaned} 淘汰${res.evicted || 0} 剩余${res.active}`, 'success');
   loadMemories();
 });
 
@@ -787,6 +917,232 @@ document.getElementById('importFileInput').addEventListener('change', async (e) 
 });
 
 // ===== Init =====
+
+// ===== Sort =====
+document.getElementById('sortSelect').addEventListener('change', (e) => {
+  const [sort, order] = e.target.value.split('-');
+  currentSort = sort;
+  currentOrder = order;
+  loadMemories();
+});
+
+// ===== Batch Mode =====
+function updateBatchCount() {
+  const count = selectedIds.size;
+  document.getElementById('batchCount').textContent = `已选 ${count} 条`;
+}
+
+function toggleBatchMode(enable) {
+  batchMode = enable;
+  selectedIds.clear();
+  const bar = document.getElementById('batchBar');
+  if (enable) bar.classList.add('visible');
+  else bar.classList.remove('visible');
+  updateBatchCount();
+  renderMemories();
+}
+
+document.getElementById('btnBatchMode').addEventListener('click', () => {
+  toggleBatchMode(!batchMode);
+});
+
+document.getElementById('batchCancel').addEventListener('click', () => {
+  selectedIds.clear();
+  updateBatchCount();
+  renderMemories();
+});
+
+document.getElementById('batchPin').addEventListener('click', async () => {
+  if (!selectedIds.size) { toast('请先选择记忆', 'error'); return; }
+  const ids = [...selectedIds];
+  const res = await api('/batch', { method: 'POST', body: { action: 'pin', ids } });
+  toast(`已置顶 ${res.affected}/${res.total} 条`, 'success');
+  selectedIds.clear(); updateBatchCount(); loadMemories();
+});
+
+document.getElementById('batchUnpin').addEventListener('click', async () => {
+  if (!selectedIds.size) { toast('请先选择记忆', 'error'); return; }
+  const ids = [...selectedIds];
+  const res = await api('/batch', { method: 'POST', body: { action: 'unpin', ids } });
+  toast(`已取消置顶 ${res.affected}/${res.total} 条`, 'success');
+  selectedIds.clear(); updateBatchCount(); loadMemories();
+});
+
+document.getElementById('batchDelete').addEventListener('click', async () => {
+  if (!selectedIds.size) { toast('请先选择记忆', 'error'); return; }
+  if (!confirm(`确认删除 ${selectedIds.size} 条记忆？此操作不可撤销。`)) return;
+  const ids = [...selectedIds];
+  const res = await api('/batch', { method: 'POST', body: { action: 'delete', ids } });
+  toast(`已删除 ${res.affected}/${res.total} 条`, 'success');
+  selectedIds.clear(); updateBatchCount(); loadMemories();
+});
+
+document.getElementById('batchTag').addEventListener('click', async () => {
+  if (!selectedIds.size) { toast('请先选择记忆', 'error'); return; }
+  const tag = prompt('请输入标签名称：');
+  if (!tag || !tag.trim()) return;
+  const ids = [...selectedIds];
+  const res = await api('/batch', { method: 'POST', body: { action: 'tag', ids, tag: tag.trim() } });
+  toast(`已打标签 ${res.affected}/${res.total} 条`, 'success');
+  selectedIds.clear(); updateBatchCount(); loadMemories();
+});
+
+// ===== Advanced Search =====
+document.getElementById('btnAdvToggle').addEventListener('click', () => {
+  const panel = document.getElementById('advancedSearch');
+  panel.classList.toggle('visible');
+});
+
+document.getElementById('btnAdvApply').addEventListener('click', () => {
+  currentDateFrom = document.getElementById('dateFrom').value || '';
+  currentDateTo = document.getElementById('dateTo').value || '';
+  const advSearch = document.getElementById('advSearchInput').value.trim();
+  if (advSearch) {
+    currentSearch = advSearch;
+    document.getElementById('searchInput').value = advSearch;
+  }
+  loadMemories();
+});
+
+document.getElementById('btnAdvClear').addEventListener('click', () => {
+  currentDateFrom = '';
+  currentDateTo = '';
+  currentSearch = '';
+  document.getElementById('dateFrom').value = '';
+  document.getElementById('dateTo').value = '';
+  document.getElementById('advSearchInput').value = '';
+  document.getElementById('searchInput').value = '';
+  loadMemories();
+});
+
+// ===== Detail Panel =====
+async function openDetail(memoryId) {
+  const mem = memories.find(m => m.id === memoryId);
+  if (!mem) return;
+
+  const body = document.getElementById('detailBody');
+  const actions = document.getElementById('detailActions');
+  const imp = mem.importance || 0;
+  const pct = Math.round(imp * 100);
+  const lvl = pct >= 70 ? 'high' : pct >= 40 ? 'medium' : 'low';
+  const created = mem.createdAt ? new Date(mem.createdAt).toLocaleString('zh-CN') : '-';
+  const updated = mem.updatedAt ? new Date(mem.updatedAt).toLocaleString('zh-CN') : '-';
+  const entities = (mem.entities || []).join(', ') || '-';
+  const tags = mem.tags || [];
+  const isReadOnly = currentScope === 'all' && mem._workspace && mem._workspace !== currentWorkspace;
+
+  // 获取关系
+  let links = [];
+  try {
+    const linksData = await api('/links/' + memoryId);
+    links = linksData.links || [];
+  } catch {}
+
+  body.innerHTML = `
+    <div class="detail-section">
+      <span class="detail-label">类型</span>
+      <span><span class="type-badge ${mem.type}">${mem.type}</span></span>
+    </div>
+    <div class="detail-section">
+      <span class="detail-label">内容</span>
+      <span class="detail-value">${escapeHtml(mem.content)}</span>
+    </div>
+    <div class="detail-section">
+      <span class="detail-label">重要度</span>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="importance-bar" style="flex:1;max-width:200px">
+          <div class="importance-fill ${lvl}" style="width:${pct}%"></div>
+        </div>
+        <span style="font-size:14px;font-weight:600">${pct}%</span>
+      </div>
+    </div>
+    <div class="detail-section">
+      <span class="detail-label">ID</span>
+      <span style="font-size:12px;color:#999;font-family:monospace">${mem.id}</span>
+    </div>
+    <div class="detail-section">
+      <span class="detail-label">实体</span>
+      <span class="detail-value">${escapeHtml(entities)}</span>
+    </div>
+    <div class="detail-section">
+      <span class="detail-label">标签</span>
+      <div class="detail-tags">
+        ${tags.length ? tags.map(t => `<span class="tag-chip">🏷️ ${escapeHtml(t)}</span>`).join('') : '<span style="color:#ccc">无标签</span>'}
+      </div>
+    </div>
+    <div class="detail-section">
+      <span class="detail-label">状态</span>
+      <span class="detail-value">${mem.pinned ? '📌 已置顶' : '未置顶'} &nbsp;|&nbsp; 👁 访问 ${mem.accessCount || 0} 次</span>
+    </div>
+    ${mem._workspace ? `<div class="detail-section"><span class="detail-label">工作区</span><span class="scope-workspace-badge">🗂 ${escapeHtml(mem._workspace)}</span>${isReadOnly ? ' <span style="color:#bbb;font-size:11px">(只读)</span>' : ''}</div>` : ''}
+    <div class="detail-section">
+      <span class="detail-label">创建时间</span>
+      <span class="detail-value">${created}</span>
+    </div>
+    <div class="detail-section">
+      <span class="detail-label">更新时间</span>
+      <span class="detail-value">${updated}</span>
+    </div>
+    <div class="detail-section">
+      <span class="detail-label">关系 (${links.length})</span>
+      <div class="detail-relations">
+        ${links.length ? links.map(l => {
+          const dir = l.fromId === memoryId ? '→' : '←';
+          const other = l.fromId === memoryId ? l.toContent : l.fromContent;
+          const otherId = l.fromId === memoryId ? l.toId : l.fromId;
+          return `<div class="detail-rel-item">
+            <span class="relation-badge rel-${l.relationType}">${dir} ${l.relationType}</span>
+            <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(other)}">${escapeHtml(other)}</span>
+            <span style="font-size:10px;color:#bbb">${otherId.slice(0,8)}</span>
+          </div>`;
+        }).join('') : '<span style="color:#ccc">暂无关系</span>'}
+      </div>
+    </div>
+  `;
+
+  // 操作按钮
+  actions.innerHTML = '';
+  if (!isReadOnly) {
+    const pinBtn = document.createElement('button');
+    pinBtn.className = 'action-btn pin';
+    pinBtn.textContent = mem.pinned ? '取消置顶' : '📌 置顶';
+    pinBtn.addEventListener('click', async () => {
+      await togglePin(mem.id, mem.pinned);
+      closeDetail();
+    });
+    const editBtn = document.createElement('button');
+    editBtn.className = 'action-btn edit';
+    editBtn.textContent = '✏️ 编辑';
+    editBtn.addEventListener('click', () => { openEdit(mem); closeDetail(); });
+    const linkBtn = document.createElement('button');
+    linkBtn.className = 'action-btn link';
+    linkBtn.textContent = '🔗 关系';
+    linkBtn.addEventListener('click', () => { openLinksModal(mem); closeDetail(); });
+    const delBtn = document.createElement('button');
+    delBtn.className = 'action-btn delete';
+    delBtn.textContent = '🗑 删除';
+    delBtn.addEventListener('click', () => { openDelete(mem); closeDetail(); });
+    actions.append(pinBtn, editBtn, linkBtn, delBtn);
+  }
+
+  document.getElementById('detailOverlay').classList.add('visible');
+  document.getElementById('detailPanel').classList.add('visible');
+}
+
+function closeDetail() {
+  document.getElementById('detailOverlay').classList.remove('visible');
+  document.getElementById('detailPanel').classList.remove('visible');
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+document.getElementById('detailClose').addEventListener('click', closeDetail);
+document.getElementById('detailOverlay').addEventListener('click', closeDetail);
+
 initScopeBar();
 loadMemories();
 setInterval(loadStats, 30000);

@@ -403,7 +403,7 @@ export async function startMcpServer(
   // ================================================================ //
   server.tool(
     'run_maintenance',
-    'Run memory maintenance: apply time decay, merge similar memories, clean low-importance ones. Returns stats.',
+    'Run memory maintenance: apply time decay, merge similar memories, clean low-importance ones, enforce capacity limit. Returns stats.',
     {},
     async () => {
       const result = engine.runMaintenanceNow();
@@ -412,9 +412,43 @@ export async function startMcpServer(
         `  Decayed: ${result.decayed} memories`,
         `  Merged:  ${result.merged} duplicates`,
         `  Cleaned: ${result.cleaned} low-importance`,
+        `  Evicted: ${result.evicted} over-capacity`,
         `  Active:  ${result.active} memories remaining`,
       ];
       return { content: [{ type: 'text', text: lines.join('\n') }] };
+    },
+  );
+
+  // ================================================================ //
+  // 工具: summarize_memories - 摘要压缩记忆
+  // ================================================================ //
+  server.tool(
+    'summarize_memories',
+    'Compress related memories into concise summaries using LLM. ' +
+    'Groups memories by shared entities and summarizes each group into one memory. ' +
+    'Original memories are archived. Requires summarizer backend to be configured.',
+    {
+      max_groups: z.number().int().min(1).max(10).default(3).describe('Max number of groups to summarize (default 3)'),
+    },
+    async ({ max_groups }) => {
+      if (!engine.hasSummarizer()) {
+        return { content: [{ type: 'text', text: 'Summarizer is not configured. Set summarizerBackend to "openai", "dashscope", or "deepseek" and provide the corresponding API key.' }] };
+      }
+      try {
+        const result = await engine.summarizeMemories(max_groups);
+        if (result.summarized === 0) {
+          return { content: [{ type: 'text', text: 'No groups large enough to summarize (need at least 3 related memories per group).' }] };
+        }
+        const lines = [
+          'Memory summarization completed:',
+          `  Groups processed: ${result.groups}`,
+          `  Summaries created: ${result.summarized}`,
+          `  Memories archived: ${result.archived}`,
+        ];
+        return { content: [{ type: 'text', text: lines.join('\n') }] };
+      } catch (err) {
+        return { content: [{ type: 'text', text: `Summarization failed: ${(err as Error).message}` }] };
+      }
     },
   );
 
