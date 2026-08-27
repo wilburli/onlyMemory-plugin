@@ -290,6 +290,7 @@ let currentType = 'all';
 let currentTag = null;   // null = 不按标签筛选
 let currentScope = 'workspace'; // 'workspace' | 'session' | 'all'
 let currentSessionId = null;    // null = 使用活跃会话
+let currentWorkspace = null;    // 当前工作区名称，initScopeBar 中填充
 let searchTimer = null;
 
 // ===== API helpers =====
@@ -328,10 +329,18 @@ async function loadMemories() {
 
 async function loadStats() {
   const s = await api('/stats');
-  document.getElementById('statTotal').textContent = s.activeCount ?? s.active ?? s.total ?? 0;
-  const all = await api('/memories?limit=999');
-  document.getElementById('statPinned').textContent = (all.memories || []).filter(m => m.pinned).length;
-  document.getElementById('statProject').textContent = s.project ?? s.projectId ?? '-';
+  if (currentScope === 'all') {
+    // 全部工作区模式：用当前已加载的 memories 统计
+    document.getElementById('statTotal').textContent = memories.length;
+    document.getElementById('statPinned').textContent = memories.filter(m => m.pinned).length;
+    const wsSet = new Set(memories.map(m => m._workspace).filter(Boolean));
+    document.getElementById('statProject').textContent = wsSet.size + ' 工作区';
+  } else {
+    document.getElementById('statTotal').textContent = s.activeCount ?? s.active ?? s.total ?? 0;
+    const all = await api('/memories?limit=999');
+    document.getElementById('statPinned').textContent = (all.memories || []).filter(m => m.pinned).length;
+    document.getElementById('statProject').textContent = s.project ?? s.projectId ?? '-';
+  }
 }
 
 async function loadTagFilterBar() {
@@ -360,6 +369,9 @@ async function loadTagFilterBar() {
 
 // ===== Scope Bar =====
 async function initScopeBar() {
+  // 获取当前工作区名称
+  const scopeData = await api('/scope');
+  currentWorkspace = scopeData.currentWorkspace || null;
   await refreshSessionSelect();
   document.querySelectorAll('.scope-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -490,22 +502,36 @@ function createCard(m) {
   meta.appendChild(countSpan);
   if (entities) { const eSpan = document.createElement('span'); eSpan.textContent = entities; meta.appendChild(eSpan); }
 
+  // 判断是否是其他工作区的记忆（只读模式）
+  const isReadOnly = currentScope === 'all' && m._workspace && m._workspace !== currentWorkspace;
+
   // Actions
   const actions = document.createElement('div');
   actions.className = 'card-actions';
-  const pinBtn = document.createElement('button');
-  pinBtn.className = 'action-btn pin';
-  pinBtn.textContent = m.pinned ? '取消置顶' : '📌 置顶';
-  const editBtn = document.createElement('button');
-  editBtn.className = 'action-btn edit';
-  editBtn.textContent = '✏️ 编辑';
-  const linkBtn = document.createElement('button');
-  linkBtn.className = 'action-btn link';
-  linkBtn.textContent = '🔗 关系';
-  const delBtn = document.createElement('button');
-  delBtn.className = 'action-btn delete';
-  delBtn.textContent = '🗑 删除';
-  actions.append(pinBtn, editBtn, linkBtn, delBtn);
+  if (!isReadOnly) {
+    const pinBtn = document.createElement('button');
+    pinBtn.className = 'action-btn pin';
+    pinBtn.textContent = m.pinned ? '取消置顶' : '📌 置顶';
+    const editBtn = document.createElement('button');
+    editBtn.className = 'action-btn edit';
+    editBtn.textContent = '✏️ 编辑';
+    const linkBtn = document.createElement('button');
+    linkBtn.className = 'action-btn link';
+    linkBtn.textContent = '🔗 关系';
+    const delBtn = document.createElement('button');
+    delBtn.className = 'action-btn delete';
+    delBtn.textContent = '🗑 删除';
+    actions.append(pinBtn, editBtn, linkBtn, delBtn);
+    pinBtn.addEventListener('click', () => togglePin(m.id, m.pinned));
+    editBtn.addEventListener('click', () => openEdit(m));
+    linkBtn.addEventListener('click', () => openLinksModal(m));
+    delBtn.addEventListener('click', () => openDelete(m));
+  } else {
+    const roLabel = document.createElement('span');
+    roLabel.style.cssText = 'font-size:11px;color:#bbb;font-style:italic';
+    roLabel.textContent = '🔒 ' + m._workspace + ' (只读)';
+    actions.appendChild(roLabel);
+  }
 
   // Tags row
   const tagsRow = document.createElement('div');
@@ -516,30 +542,30 @@ function createCard(m) {
     (tags || []).forEach(tag => {
       const chip = document.createElement('span');
       chip.className = 'tag-chip';
-      chip.innerHTML = `🏷️ ${tag} <span class="remove-tag" title="移除标签">×</span>`;
-      chip.querySelector('.remove-tag').addEventListener('click', async (e) => {
-        e.stopPropagation();
-        await api('/untag/' + m.id, { method: 'POST', body: { tag } });
-        toast('已移除标签: ' + tag, 'info');
-        loadMemories();
-      });
+      chip.innerHTML = `🏷️ ${tag}${isReadOnly ? '' : ' <span class="remove-tag" title="移除标签">×</span>'}`;
+      if (!isReadOnly) {
+        const rmEl = chip.querySelector('.remove-tag');
+        if (rmEl) rmEl.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          await api('/untag/' + m.id, { method: 'POST', body: { tag } });
+          toast('已移除标签: ' + tag, 'info');
+          loadMemories();
+        });
+      }
       chip.addEventListener('click', () => { currentTag = tag; loadMemories(); });
       tagsRow.appendChild(chip);
     });
-    const addBtn = document.createElement('button');
-    addBtn.className = 'tag-add-btn';
-    addBtn.textContent = '+ 添加标签';
-    addBtn.addEventListener('click', () => openTagModal(m));
-    tagsRow.appendChild(addBtn);
+    if (!isReadOnly) {
+      const addBtn = document.createElement('button');
+      addBtn.className = 'tag-add-btn';
+      addBtn.textContent = '+ 添加标签';
+      addBtn.addEventListener('click', () => openTagModal(m));
+      tagsRow.appendChild(addBtn);
+    }
   };
   renderTagsRow(m.tags || []);
 
   card.append(header, content, tagsRow, meta, actions);
-
-  pinBtn.addEventListener('click', () => togglePin(m.id, m.pinned));
-  editBtn.addEventListener('click', () => openEdit(m));
-  linkBtn.addEventListener('click', () => openLinksModal(m));
-  delBtn.addEventListener('click', () => openDelete(m));
 
   return card;
 }

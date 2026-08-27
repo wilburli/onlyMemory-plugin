@@ -354,10 +354,13 @@ export class WebServer {
       // 其他工作区：临时 SqliteStore 只读
       try {
         const tmpStore = new SqliteStore(dbPath);
-        await tmpStore.init();
-        const mems = tmpStore.getAllActive().map((m) => ({ ...m, _workspace: ws }));
-        allMemories.push(...(mems as Memory[]));
-        tmpStore.close();
+        try {
+          await tmpStore.init();
+          const mems = tmpStore.getAllActive().map((m) => ({ ...m, _workspace: ws }));
+          allMemories.push(...(mems as Memory[]));
+        } finally {
+          tmpStore.close();
+        }
       } catch {
         // 忽略加载失败的工作区
       }
