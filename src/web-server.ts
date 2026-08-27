@@ -103,6 +103,8 @@ export class WebServer {
         if (path.startsWith('/tags/')) return this.filterByTag(decodeURIComponent(path.slice(6)), res);
         if (path.startsWith('/links/')) return this.getLinks(path.slice(7), res);
         if (path === '/config') return this.getConfig(res);
+        if (path === '/health') return this.getHealth(res);
+        if (path === '/export-jsonl') return this.exportJsonl(res);
       }
 
       // POST routes
@@ -125,6 +127,7 @@ export class WebServer {
         if (path === '/import') return this.importMemories(body, res);
         if (path === '/summarize') return this.summarizeMemories(body, res);
         if (path === '/batch') return this.batchOperation(body, res);
+        if (path === '/import-jsonl') return this.importJsonl(body, res);
       }
 
       return this.json(res, { error: 'Not Found' }, 404);
@@ -369,6 +372,26 @@ export class WebServer {
       embeddingBackend: config.embeddingBackend,
       ...stats,
     });
+  }
+
+  private getHealth(res: import('node:http').ServerResponse) {
+    this.json(res, this.engine.getHealthReport());
+  }
+
+  private exportJsonl(res: import('node:http').ServerResponse) {
+    const result = this.engine.exportToJsonlString();
+    res.writeHead(200, {
+      'Content-Type': 'application/x-ndjson; charset=utf-8',
+      'Content-Disposition': `attachment; filename="memories_${Date.now()}.jsonl"`,
+    });
+    res.end(result.content);
+  }
+
+  private async importJsonl(body: Record<string, unknown>, res: import('node:http').ServerResponse) {
+    const content = body.content as string;
+    if (!content) return this.json(res, { error: 'content is required' }, 400);
+    const imported = await this.engine.importFromJsonlString(content);
+    this.json(res, { ok: true, imported });
   }
 
   private exportMemories(res: import('node:http').ServerResponse) {

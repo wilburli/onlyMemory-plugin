@@ -318,6 +318,98 @@ export class MemoryEngine {
   }
 
   // ================================================================ //
+  // JSONL 导入导出
+  // ================================================================ //
+
+  /** 导出记忆为 JSONL 文件（每行一条 JSON，适合大批量迁移） */
+  exportToJsonl(filePath: string): number {
+    this.ensureInitialized();
+    const memories = this.store.exportAll();
+    const lines = memories.map((m) => JSON.stringify(m));
+    fs.writeFileSync(filePath, lines.join('\n') + '\n', 'utf-8');
+    return memories.length;
+  }
+
+  /** 导出记忆为 JSONL 字符串（供 Web API 使用） */
+  exportToJsonlString(): { content: string; count: number } {
+    this.ensureInitialized();
+    const memories = this.store.exportAll();
+    const lines = memories.map((m) => JSON.stringify(m));
+    return { content: lines.join('\n') + '\n', count: memories.length };
+  }
+
+  /** 从 JSONL 文件导入记忆 */
+  async importFromJsonl(filePath: string): Promise<number> {
+    this.ensureInitialized();
+    const raw = fs.readFileSync(filePath, 'utf-8');
+    return this.importFromJsonlString(raw);
+  }
+
+  /** 从 JSONL 字符串导入记忆（供 Web API 使用） */
+  async importFromJsonlString(content: string): Promise<number> {
+    this.ensureInitialized();
+    const lines = content.split('\n').filter((l) => l.trim());
+    let imported = 0;
+    for (const line of lines) {
+      try {
+        const entry = JSON.parse(line) as Record<string, unknown>;
+        const c = (entry.content as string) ?? '';
+        if (!c) continue;
+        await this.remember(
+          c,
+          typeof entry.importance === 'number' ? entry.importance : 0.5,
+        );
+        imported++;
+      } catch {
+        // 跳过解析失败的行
+      }
+    }
+    return imported;
+  }
+
+  // ================================================================ //
+  // 健康报告
+  // ================================================================ //
+
+  /** 获取记忆库健康报告 */
+  getHealthReport(): {
+    active: number;
+    archived: number;
+    pinned: number;
+    importance: { high: number; medium: number; low: number; avg: number };
+    tags: number;
+    relations: number;
+    sessions: number;
+    leastAccessed: Array<{ id: string; content: string; accessCount: number; importance: number }>;
+    config: { maxActiveMemories: number; maxContextTokens: number; summarizerEnabled: boolean; embeddingEnabled: boolean };
+  } {
+    this.ensureInitialized();
+    const importance = this.store.getImportanceDistribution();
+    const leastAccessed = this.store.getLeastAccessedMemories(10).map((m) => ({
+      id: m.id,
+      content: m.content,
+      accessCount: m.accessCount,
+      importance: m.importance,
+    }));
+    return {
+      active: this.store.getActiveCount(),
+      archived: this.store.getArchivedCount(),
+      pinned: this.store.getPinnedCount(),
+      importance,
+      tags: this.store.getTagCount(),
+      relations: this.store.getRelationCount(),
+      sessions: this.store.getSessionIds().length,
+      leastAccessed,
+      config: {
+        maxActiveMemories: this.config.maxActiveMemories,
+        maxContextTokens: this.config.maxContextTokens,
+        summarizerEnabled: this.summarizerProvider !== null,
+        embeddingEnabled: this.embeddingProvider !== null,
+      },
+    };
+  }
+
+  // ================================================================ //
   // 生命周期
   // ================================================================ //
 

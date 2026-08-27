@@ -452,6 +452,127 @@ export async function startMcpServer(
     },
   );
 
+  // ================================================================ //
+  // 工具: export_memories_jsonl - JSONL 导出
+  // ================================================================ //
+  server.tool(
+    'export_memories_jsonl',
+    'Export all memories to a JSONL file (one JSON object per line). Better for large datasets and streaming.',
+    {
+      path: z.string().describe('Absolute file path to export to'),
+    },
+    async ({ path: filePath }) => {
+      const count = engine.exportToJsonl(filePath);
+      return { content: [{ type: 'text', text: `Exported ${count} memories to ${filePath} (JSONL format)` }] };
+    },
+  );
+
+  // ================================================================ //
+  // 工具: import_memories_jsonl - JSONL 导入
+  // ================================================================ //
+  server.tool(
+    'import_memories_jsonl',
+    'Import memories from a JSONL file (one JSON object per line).',
+    {
+      path: z.string().describe('Absolute file path to import from'),
+    },
+    async ({ path: filePath }) => {
+      const count = await engine.importFromJsonl(filePath);
+      return { content: [{ type: 'text', text: `Imported ${count} memories from ${filePath} (JSONL format)` }] };
+    },
+  );
+
+  // ================================================================ //
+  // 工具: list_sessions - 查看历史会话
+  // ================================================================ //
+  server.tool(
+    'list_sessions',
+    'List all stored session IDs with metadata. Use this to find sessions and view their memories.',
+    {
+      limit: z.number().int().min(1).max(50).default(20).describe('Max sessions to list (default 20)'),
+    },
+    async ({ limit }) => {
+      const sessionIds = engine.getSessionIds();
+      if (sessionIds.length === 0) {
+        return { content: [{ type: 'text', text: 'No sessions found.' }] };
+      }
+      const currentSid = engine.getCurrentSessionId();
+      const lines = sessionIds.slice(0, limit).map((sid) => {
+        const current = sid === currentSid ? ' (current)' : '';
+        return `- ${sid}${current}`;
+      });
+      lines.unshift(`Total: ${sessionIds.length} sessions (showing ${Math.min(limit, sessionIds.length)}):\n`);
+      return { content: [{ type: 'text', text: lines.join('\n') }] };
+    },
+  );
+
+  // ================================================================ //
+  // 工具: get_session_memories - 查看指定会话的记忆
+  // ================================================================ //
+  server.tool(
+    'get_session_memories',
+    'Get all memories that were created during a specific session. Use list_sessions first to find session IDs.',
+    {
+      session_id: z.string().describe('The session ID to get memories for'),
+      limit: z.number().int().min(1).max(50).default(20).describe('Max memories to return (default 20)'),
+    },
+    async ({ session_id, limit }) => {
+      const memories = engine.getMemoriesBySession(session_id);
+      if (memories.length === 0) {
+        return { content: [{ type: 'text', text: `No memories found for session: ${session_id}` }] };
+      }
+      const lines = memories.slice(0, limit).map((m) => {
+        const pin = m.pinned ? ' 📌' : '';
+        return `- [${m.type}] ${m.content} (importance: ${m.importance.toFixed(2)}, id: ${m.id})${pin}`;
+      });
+      lines.unshift(`Session ${session_id}: ${memories.length} memories (showing ${Math.min(limit, memories.length)}):\n`);
+      return { content: [{ type: 'text', text: lines.join('\n') }] };
+    },
+  );
+
+  // ================================================================ //
+  // 工具: memory_health - 记忆库健康报告
+  // ================================================================ //
+  server.tool(
+    'memory_health',
+    'Get a comprehensive health report of the memory store: counts by status, importance distribution, ' +
+    'least accessed memories, tag/relation stats, and configuration overview.',
+    {},
+    async () => {
+      const report = engine.getHealthReport();
+      const lines = [
+        '=== Memory Health Report ===',
+        '',
+        `Active:   ${report.active}`,
+        `Archived: ${report.archived}`,
+        `Pinned:   ${report.pinned}`,
+        '',
+        'Importance Distribution:',
+        `  High (≥0.7):   ${report.importance.high}`,
+        `  Medium (0.4-0.7): ${report.importance.medium}`,
+        `  Low (<0.4):    ${report.importance.low}`,
+        `  Average:       ${report.importance.avg.toFixed(3)}`,
+        '',
+        `Tags:      ${report.tags}`,
+        `Relations: ${report.relations}`,
+        `Sessions:  ${report.sessions}`,
+        '',
+        'Configuration:',
+        `  Max active memories: ${report.config.maxActiveMemories}`,
+        `  Max context tokens:  ${report.config.maxContextTokens}`,
+        `  Summarizer:  ${report.config.summarizerEnabled ? 'enabled' : 'disabled'}`,
+        `  Embedding:   ${report.config.embeddingEnabled ? 'enabled' : 'disabled'}`,
+      ];
+      if (report.leastAccessed.length > 0) {
+        lines.push('', 'Least Accessed Memories (Top 10):');
+        for (const m of report.leastAccessed) {
+          lines.push(`  [${m.accessCount}x] ${m.content} (imp: ${m.importance.toFixed(2)}, id: ${m.id})`);
+        }
+      }
+      return { content: [{ type: 'text', text: lines.join('\n') }] };
+    },
+  );
+
   // ---- 启动 stdio 传输 ----
   const transport = new StdioServerTransport();
   await server.connect(transport);

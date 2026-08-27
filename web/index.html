@@ -190,6 +190,27 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica N
 .detail-relations{display:flex;flex-direction:column;gap:8px}
 .detail-rel-item{padding:8px 12px;background:#f9f9f9;border-radius:8px;font-size:13px;display:flex;gap:8px;align-items:center}
 .detail-actions{padding:16px 20px;border-top:1px solid #eee;display:flex;gap:8px;flex-wrap:wrap}
+
+/* Health Report */
+.health-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
+.health-stat{background:#f9f9f9;border-radius:8px;padding:12px;text-align:center}
+.health-stat .value{font-size:24px;font-weight:700;color:#1976d2}
+.health-stat .label{font-size:11px;color:#9e9e9e;text-transform:uppercase;margin-top:4px}
+.health-bar{height:8px;background:#e0e0e0;border-radius:4px;overflow:hidden;margin:8px 0}
+.health-bar-fill{height:100%;border-radius:4px;display:flex;gap:0}
+.health-bar-high{background:#4caf50}
+.health-bar-medium{background:#ff9800}
+.health-bar-low{background:#f44336}
+.health-section{margin-top:16px}
+.health-section h4{font-size:13px;color:#555;margin-bottom:8px;font-weight:600}
+.health-table{width:100%;font-size:12px;border-collapse:collapse}
+.health-table th{text-align:left;padding:6px 8px;border-bottom:2px solid #eee;color:#9e9e9e;font-weight:600;text-transform:uppercase;font-size:10px}
+.health-table td{padding:6px 8px;border-bottom:1px solid #f5f5f5}
+.health-table tr:hover td{background:#f9f9f9}
+.health-config{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.health-config-item{padding:4px 10px;border-radius:12px;font-size:11px;font-weight:600}
+.health-config-on{background:#e8f5e9;color:#2e7d32;border:1px solid #a5d6a7}
+.health-config-off{background:#fafafa;color:#bbb;border:1px solid #e0e0e0}
 </style>
 </head>
 <body>
@@ -243,9 +264,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica N
   <button class="btn-add" id="btnAdd">+ 新建记忆</button>
   <button class="action-btn" id="btnBatchMode" title="切换批量操作模式">☑️ 批量</button>
   <button class="action-btn" id="btnMaintenance" title="运行维护：衰减 + 合并 + 清理">🔧 维护</button>
+  <button class="action-btn" id="btnHealth" title="查看记忆库健康报告">📋 健康报告</button>
   <button class="action-btn" id="btnExport" title="导出所有记忆为 JSON">📤 导出</button>
+  <button class="action-btn" id="btnExportJsonl" title="导出所有记忆为 JSONL（每行一条，适合大批量）">📤 JSONL</button>
   <button class="action-btn" id="btnImport" title="从 JSON 文件导入记忆">📥 导入</button>
-  <input type="file" id="importFileInput" accept=".json" style="display:none">
+  <input type="file" id="importFileInput" accept=".json,.jsonl" style="display:none">
 </div>
 
 <!-- Advanced Search Panel -->
@@ -371,6 +394,17 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica N
     <div class="modal-actions">
       <button class="btn-cancel" id="btnCancelLinks">关闭</button>
       <button class="btn-save" id="btnCreateLink">建立关系</button>
+    </div>
+  </div>
+</div>
+
+<!-- Health Report Modal -->
+<div id="healthModal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:640px">
+    <h2>📋 记忆库健康报告</h2>
+    <div id="healthContent" style="margin-top:16px"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="btnCloseHealth">关闭</button>
     </div>
   </div>
 </div>
@@ -902,18 +936,111 @@ document.getElementById('importFileInput').addEventListener('change', async (e) 
   if (!file) return;
   try {
     const text = await file.text();
-    const data = JSON.parse(text);
-    const list = Array.isArray(data) ? data : (data.memories ?? []);
-    if (!list.length) { toast('文件中没有可导入的记忆', 'error'); return; }
-    const res = await api('/import', { method: 'POST', body: { memories: list } });
-    if (res.error) { toast(res.error, 'error'); return; }
-    toast(`已导入 ${res.imported}/${res.total} 条记忆`, 'success');
+    const isJsonl = file.name.endsWith('.jsonl');
+
+    if (isJsonl) {
+      // JSONL 格式
+      const res = await api('/import-jsonl', { method: 'POST', body: { content: text } });
+      if (res.error) { toast(res.error, 'error'); return; }
+      toast(`已导入 ${res.imported} 条记忆 (JSONL)`, 'success');
+    } else {
+      // JSON 格式
+      const data = JSON.parse(text);
+      const list = Array.isArray(data) ? data : (data.memories ?? []);
+      if (!list.length) { toast('文件中没有可导入的记忆', 'error'); return; }
+      const res = await api('/import', { method: 'POST', body: { memories: list } });
+      if (res.error) { toast(res.error, 'error'); return; }
+      toast(`已导入 ${res.imported}/${res.total} 条记忆`, 'success');
+    }
     loadMemories();
   } catch (err) {
     toast('解析文件失败: ' + err.message, 'error');
   }
   // 重置 input，允许重复选择同一文件
   e.target.value = '';
+});
+
+// ===== Health Report =====
+document.getElementById('btnHealth').addEventListener('click', async () => {
+  const report = await api('/health');
+  if (report.error) { toast(report.error, 'error'); return; }
+
+  const imp = report.importance;
+  const total = report.active || 1;
+  const highPct = Math.round((imp.high / total) * 100);
+  const medPct = Math.round((imp.medium / total) * 100);
+  const lowPct = 100 - highPct - medPct;
+
+  const html = `
+    <div class="health-grid">
+      <div class="health-stat"><div class="value">${report.active}</div><div class="label">活跃记忆</div></div>
+      <div class="health-stat"><div class="value">${report.archived}</div><div class="label">已归档</div></div>
+      <div class="health-stat"><div class="value">${report.pinned}</div><div class="label">已置顶</div></div>
+      <div class="health-stat"><div class="value">${imp.avg.toFixed(2)}</div><div class="label">平均重要度</div></div>
+      <div class="health-stat"><div class="value">${report.tags}</div><div class="label">标签数</div></div>
+      <div class="health-stat"><div class="value">${report.relations}</div><div class="label">关系数</div></div>
+    </div>
+    <div class="health-section">
+      <h4>重要度分布</h4>
+      <div style="display:flex;gap:8px;font-size:12px;color:#666;margin-bottom:4px">
+        <span>🟢 高 ${imp.high}</span>
+        <span>🟠 中 ${imp.medium}</span>
+        <span>🔴 低 ${imp.low}</span>
+      </div>
+      <div class="health-bar">
+        <div class="health-bar-fill">
+          <div class="health-bar-high" style="width:${highPct}%"></div>
+          <div class="health-bar-medium" style="width:${medPct}%"></div>
+          <div class="health-bar-low" style="width:${lowPct > 0 ? lowPct : 0}%"></div>
+        </div>
+      </div>
+    </div>
+    ${report.leastAccessed.length > 0 ? `
+    <div class="health-section">
+      <h4>最久未访问 Top 10</h4>
+      <table class="health-table">
+        <thead><tr><th>内容</th><th>访问</th><th>重要度</th></tr></thead>
+        <tbody>
+          ${report.leastAccessed.map(m => `<tr>
+            <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(m.content)}">${escapeHtml(m.content)}</td>
+            <td>${m.accessCount}</td>
+            <td>${Math.round(m.importance * 100)}%</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>` : ''}
+    <div class="health-section">
+      <h4>配置状态</h4>
+      <div class="health-config">
+        <span class="health-config-item ${report.config.embeddingEnabled ? 'health-config-on' : 'health-config-off'}">${report.config.embeddingEnabled ? '✅' : '⬜'} Embedding</span>
+        <span class="health-config-item ${report.config.summarizerEnabled ? 'health-config-on' : 'health-config-off'}">${report.config.summarizerEnabled ? '✅' : '⬜'} 摘要器</span>
+        <span class="health-config-item health-config-on">📊 上限 ${report.config.maxActiveMemories}</span>
+        <span class="health-config-item health-config-on">🔤 Token ${report.config.maxContextTokens}</span>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('healthContent').innerHTML = html;
+  document.getElementById('healthModal').classList.remove('hidden');
+});
+document.getElementById('btnCloseHealth').addEventListener('click', () => document.getElementById('healthModal').classList.add('hidden'));
+
+// ===== JSONL Export =====
+document.getElementById('btnExportJsonl').addEventListener('click', async () => {
+  const res = await fetch('/api/export-jsonl');
+  if (!res.ok) { toast('导出失败', 'error'); return; }
+  const text = await res.text();
+  const lines = text.split('\n').filter(Boolean);
+  const blob = new Blob([text], { type: 'application/x-ndjson' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `memories_${new Date().toISOString().slice(0, 10)}.jsonl`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast(`已导出 ${lines.length} 条记忆 (JSONL)`, 'success');
 });
 
 // ===== Init =====
@@ -1072,7 +1199,17 @@ async function openDetail(memoryId) {
     </div>
     <div class="detail-section">
       <span class="detail-label">状态</span>
-      <span class="detail-value">${mem.pinned ? '📌 已置顶' : '未置顶'} &nbsp;|&nbsp; 👁 访问 ${mem.accessCount || 0} 次</span>
+      <span class="detail-value">${mem.pinned ? '📌 已置顶' : '未置顶'}</span>
+    </div>
+    <div class="detail-section">
+      <span class="detail-label">检索质量</span>
+      <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px">
+        <div style="display:flex;gap:16px;font-size:13px">
+          <span>👁 被检索 <strong>${mem.accessCount || 0}</strong> 次</span>
+          <span>📅 最后访问: ${mem.lastAccessed ? new Date(mem.lastAccessed).toLocaleString('zh-CN') : '从未'}</span>
+        </div>
+        ${(mem.accessCount || 0) === 0 ? '<span style="font-size:11px;color:#ff9800">⚠️ 此记忆尚未被检索命中过，可能重要度偏低或内容较新</span>' : ''}
+      </div>
     </div>
     ${mem._workspace ? `<div class="detail-section"><span class="detail-label">工作区</span><span class="scope-workspace-badge">🗂 ${escapeHtml(mem._workspace)}</span>${isReadOnly ? ' <span style="color:#bbb;font-size:11px">(只读)</span>' : ''}</div>` : ''}
     <div class="detail-section">

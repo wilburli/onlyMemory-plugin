@@ -320,6 +320,86 @@ export class SqliteStore {
     return results[0]?.values[0]?.[0] as number ?? 0;
   }
 
+  /** 获取归档记忆数量 */
+  getArchivedCount(): number {
+    if (!this.db) return 0;
+    const results = this.db.exec(
+      "SELECT COUNT(*) FROM memories WHERE status = 'archived'",
+    );
+    return results[0]?.values[0]?.[0] as number ?? 0;
+  }
+
+  /** 获取置顶记忆数量 */
+  getPinnedCount(): number {
+    if (!this.db) return 0;
+    const results = this.db.exec(
+      "SELECT COUNT(*) FROM memories WHERE status = 'active' AND pinned = 1",
+    );
+    return results[0]?.values[0]?.[0] as number ?? 0;
+  }
+
+  /** 获取记忆重要度分布统计 */
+  getImportanceDistribution(): { high: number; medium: number; low: number; avg: number } {
+    if (!this.db) return { high: 0, medium: 0, low: 0, avg: 0 };
+    const results = this.db.exec(
+      `SELECT
+        SUM(CASE WHEN importance >= 0.7 THEN 1 ELSE 0 END) as high,
+        SUM(CASE WHEN importance >= 0.4 AND importance < 0.7 THEN 1 ELSE 0 END) as medium,
+        SUM(CASE WHEN importance < 0.4 THEN 1 ELSE 0 END) as low,
+        AVG(importance) as avg
+       FROM memories WHERE status = 'active'`,
+    );
+    if (results.length === 0 || results[0].values.length === 0) return { high: 0, medium: 0, low: 0, avg: 0 };
+    const row = results[0].values[0];
+    return {
+      high: (row[0] as number) ?? 0,
+      medium: (row[1] as number) ?? 0,
+      low: (row[2] as number) ?? 0,
+      avg: (row[3] as number) ?? 0,
+    };
+  }
+
+  /** 获取最久未访问的记忆 */
+  getLeastAccessedMemories(limit: number): Memory[] {
+    if (!this.db) return [];
+    const results = this.db.exec(
+      `SELECT * FROM memories WHERE status = 'active'
+       ORDER BY access_count ASC, last_accessed ASC LIMIT ?`,
+      [limit],
+    );
+    if (results.length === 0) return [];
+    return results[0].values.map((row: unknown[]) => rowToMemory(results[0].columns, row));
+  }
+
+  /** 获取关系总数 */
+  getRelationCount(): number {
+    if (!this.db) return 0;
+    const results = this.db.exec('SELECT COUNT(*) FROM memory_relations');
+    return results[0]?.values[0]?.[0] as number ?? 0;
+  }
+
+  /** 获取标签总数 */
+  getTagCount(): number {
+    if (!this.db) return 0;
+    const results = this.db.exec('SELECT COUNT(DISTINCT tag) FROM memory_tags');
+    return results[0]?.values[0]?.[0] as number ?? 0;
+  }
+
+  /** 获取所有会话日志（含记忆数） */
+  getSessionLogs(): Array<{ sessionId: string; summary: string | null; endTime: string | null; memoryCount: number }> {
+    if (!this.db) return [];
+    const results = this.db.exec(
+      'SELECT session_id, summary, end_time, memory_count FROM session_logs ORDER BY end_time DESC',
+    );
+    if (results.length === 0) return [];
+    return results[0].values.map((row: unknown[]) => ({
+      sessionId: row[0] as string,
+      summary: (row[1] as string) ?? null,
+      endTime: (row[2] as string) ?? null,
+      memoryCount: (row[3] as number) ?? 0,
+    }));
+  }
+
   // ================================================================ //
   // 全文搜索
   // ================================================================ //
