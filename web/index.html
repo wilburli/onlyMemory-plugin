@@ -180,6 +180,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica N
     <button class="filter-btn" data-type="pinned">📌 Pinned</button>
   </div>
   <button class="btn-add" id="btnAdd">+ 新建记忆</button>
+  <button class="action-btn" id="btnMaintenance" title="运行维护：衰减 + 合并 + 清理">🔧 维护</button>
+  <button class="action-btn" id="btnExport" title="导出所有记忆为 JSON">📤 导出</button>
+  <button class="action-btn" id="btnImport" title="从 JSON 文件导入记忆">📥 导入</button>
+  <input type="file" id="importFileInput" accept=".json" style="display:none">
 </div>
 
 <main class="content">
@@ -732,6 +736,54 @@ document.getElementById('btnConfirmDelete').addEventListener('click', async () =
 // Close modals on overlay click
 document.querySelectorAll('.modal-overlay').forEach(el => {
   el.addEventListener('click', e => { if (e.target === el) el.classList.add('hidden'); });
+});
+
+// ===== Maintenance =====
+document.getElementById('btnMaintenance').addEventListener('click', async () => {
+  if (!confirm('确认运行记忆库维护？\n\n将执行：时间衰减 + 合并重复 + 清理低分')) return;
+  const res = await api('/maintenance', { method: 'POST' });
+  if (res.error) { toast(res.error, 'error'); return; }
+  toast(`维护完成: 衰减${res.decayed} 合并${res.merged} 清理${res.cleaned} 剩余${res.active}`, 'success');
+  loadMemories();
+});
+
+// ===== Export =====
+document.getElementById('btnExport').addEventListener('click', async () => {
+  const data = await api('/export');
+  if (data.error) { toast(data.error, 'error'); return; }
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `memories_${data.projectId}_${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast(`已导出 ${data.count} 条记忆`, 'success');
+});
+
+// ===== Import =====
+document.getElementById('btnImport').addEventListener('click', () => {
+  document.getElementById('importFileInput').click();
+});
+document.getElementById('importFileInput').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    const list = Array.isArray(data) ? data : (data.memories ?? []);
+    if (!list.length) { toast('文件中没有可导入的记忆', 'error'); return; }
+    const res = await api('/import', { method: 'POST', body: { memories: list } });
+    if (res.error) { toast(res.error, 'error'); return; }
+    toast(`已导入 ${res.imported}/${res.total} 条记忆`, 'success');
+    loadMemories();
+  } catch (err) {
+    toast('解析文件失败: ' + err.message, 'error');
+  }
+  // 重置 input，允许重复选择同一文件
+  e.target.value = '';
 });
 
 // ===== Init =====

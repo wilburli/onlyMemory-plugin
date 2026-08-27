@@ -398,6 +398,26 @@ export async function startMcpServer(
     },
   );
 
+  // ================================================================ //
+  // 工具: run_maintenance - 手动触发记忆库维护
+  // ================================================================ //
+  server.tool(
+    'run_maintenance',
+    'Run memory maintenance: apply time decay, merge similar memories, clean low-importance ones. Returns stats.',
+    {},
+    async () => {
+      const result = engine.runMaintenanceNow();
+      const lines = [
+        'Memory maintenance completed:',
+        `  Decayed: ${result.decayed} memories`,
+        `  Merged:  ${result.merged} duplicates`,
+        `  Cleaned: ${result.cleaned} low-importance`,
+        `  Active:  ${result.active} memories remaining`,
+      ];
+      return { content: [{ type: 'text', text: lines.join('\n') }] };
+    },
+  );
+
   // ---- 启动 stdio 传输 ----
   const transport = new StdioServerTransport();
   await server.connect(transport);

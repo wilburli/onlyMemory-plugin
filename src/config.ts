@@ -18,6 +18,8 @@ export interface MemoryPluginConfig {
   dbName: string;
   /** 检索返回的最大记忆条数 */
   topK: number;
+  /** 上下文注入的 token 预算上限（0 = 不限制） */
+  maxContextTokens: number;
   /** 重要性阈值：高于此值的记忆直接入库 */
   importanceThreshold: number;
   /** 衰减半衰期（天） */
@@ -41,6 +43,7 @@ export const DEFAULT_CONFIG: MemoryPluginConfig = {
   ),
   dbName: 'memory.db',
   topK: 10,
+  maxContextTokens: 2000,
   importanceThreshold: 0.5,
   halfLifeDays: 30,
   embeddingBackend: 'none',

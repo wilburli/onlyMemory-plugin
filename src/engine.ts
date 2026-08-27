@@ -22,6 +22,7 @@ import { createEmbeddingProvider, type EmbeddingProvider } from './embedding/emb
 import * as fs from 'node:fs';
 
 const EXPORT_VERSION = '1.0';
+const MAINTENANCE_INTERVAL = 20; // 每 20 次写入后自动触发轻量维护
 
 export class MemoryEngine {
   private config: MemoryPluginConfig;
@@ -40,6 +41,7 @@ export class MemoryEngine {
   private sessionUserMsgs: string[] = [];
   private sessionAssistantMsgs: string[] = [];
   private initialized = false;
+  private writeCounter = 0;  // 写入计数器，用于自动维护
 
   constructor(config?: Partial<MemoryPluginConfig>) {
     this.config = resolveConfig(config);
@@ -127,6 +129,8 @@ export class MemoryEngine {
     if (embedding) this.vectorStore.add(mem.id, embedding);
     // 新增后立即运行合并，清理可能的相似重复
     this.merger.merge(this.store);
+    // 写入计数 + 自动轻量维护
+    this.tickMaintenance();
     return mem;
   }
 
@@ -261,16 +265,22 @@ export class MemoryEngine {
   /** 导出记忆到 JSON 文件 */
   exportToFile(filePath: string): number {
     this.ensureInitialized();
+    const data = this.exportMemoriesData();
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+    return data.count;
+  }
+
+  /** 导出记忆为 JSON 对象（供 Web API 使用） */
+  exportMemoriesData(): { version: string; projectId: string; exportedAt: string; count: number; memories: object[] } {
+    this.ensureInitialized();
     const memories = this.store.exportAll();
-    const data = {
+    return {
       version: EXPORT_VERSION,
       projectId: this.config.projectId,
       exportedAt: new Date().toISOString(),
       count: memories.length,
       memories,
     };
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
-    return memories.length;
   }
 
   /** 从 JSON 文件导入记忆 */
@@ -278,22 +288,24 @@ export class MemoryEngine {
     this.ensureInitialized();
     const raw = fs.readFileSync(filePath, 'utf-8');
     const data = JSON.parse(raw);
-
     const list: object[] = Array.isArray(data) ? data : (data.memories ?? []);
-    let imported = 0;
+    return this.importMemoriesData(list);
+  }
 
+  /** 从数组导入记忆（供 Web API 使用） */
+  async importMemoriesData(list: object[]): Promise<number> {
+    this.ensureInitialized();
+    let imported = 0;
     for (const item of list) {
       const entry = item as Record<string, unknown>;
       const content = (entry.content as string) ?? '';
       if (!content) continue;
-
       await this.remember(
         content,
         typeof entry.importance === 'number' ? entry.importance : 0.5,
       );
       imported++;
     }
-
     return imported;
   }
 
@@ -455,6 +467,7 @@ export class MemoryEngine {
 
     this.store.insertMemory(mem);
     if (embedding) this.vectorStore.add(mem.id, embedding);
+    this.tickMaintenance();
   }
 
   private inferType(text: string): MemoryType {
@@ -473,5 +486,33 @@ export class MemoryEngine {
     } catch {
       // 维护失败不影响主流程
     }
+  }
+
+  /** 写入计数器：每 MAINTENANCE_INTERVAL 次写入触发轻量维护 */
+  private tickMaintenance(): void {
+    this.writeCounter++;
+    if (this.writeCounter >= MAINTENANCE_INTERVAL) {
+      this.writeCounter = 0;
+      try {
+        this.merger.merge(this.store);
+        this.cleaner.clean(this.store);
+        this.store.flush();
+      } catch {
+        // 自动维护失败不影响主流程
+      }
+    }
+  }
+
+  /** 公开接口：手动触发完整维护（衰减 + 合并 + 清理），返回统计信息 */
+  runMaintenanceNow(): { decayed: number; merged: number; cleaned: number; active: number } {
+    this.ensureInitialized();
+    const before = this.store.getActiveCount();
+    const decayed = this.decay.applyDecay(this.store);
+    const merged = this.merger.merge(this.store);
+    const cleaned = this.cleaner.clean(this.store);
+    this.store.flush();
+    this.writeCounter = 0;
+    const active = this.store.getActiveCount();
+    return { decayed, merged, cleaned, active };
   }
 }

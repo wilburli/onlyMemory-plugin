@@ -37,13 +37,26 @@ export class MultiRecallRetriever {
     this.embeddingProvider = embeddingProvider;
   }
 
-  /** 检索相关记忆并返回格式化的上下文文本 */
+  /** 检索相关记忆并返回格式化的上下文文本（受 token 预算约束） */
   async retrieveContextText(query: string): Promise<string> {
     const results = await this.retrieve(query);
     if (results.length === 0) return '';
 
-    const lines = results.map((r) => `- [${r.memory.type}] ${r.memory.content}`);
-    return `## 相关记忆\n${lines.join('\n')}`;
+    const budget = this.config.maxContextTokens;
+    const header = '## 相关记忆\n';
+    let usedTokens = estimateTokens(header);
+    const lines: string[] = [];
+
+    for (const r of results) {
+      const line = `- [${r.memory.type}] ${r.memory.content}`;
+      const lineTokens = estimateTokens(line);
+      if (budget > 0 && usedTokens + lineTokens > budget) break;
+      lines.push(line);
+      usedTokens += lineTokens;
+    }
+
+    if (lines.length === 0) return '';
+    return `${header}${lines.join('\n')}`;
   }
 
   /** 多路召回检索 */
@@ -184,4 +197,19 @@ export class MultiRecallRetriever {
       .sort((a, b) => b.score - a.score)
       .slice(0, limit);
   }
+}
+
+/**
+ * 估算文本的 token 数量。
+ * 中文字符按 1.5 token/字，ASCII 单词按 1 token/词。
+ */
+function estimateTokens(text: string): number {
+  let tokens = 0;
+  // 匹配中文字符和其他非 ASCII 字符
+  const cjk = text.match(/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/g);
+  if (cjk) tokens += Math.ceil(cjk.length * 1.5);
+  // ASCII 部分按单词估算
+  const ascii = text.replace(/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/g, ' ').trim();
+  if (ascii) tokens += ascii.split(/\s+/).filter(Boolean).length;
+  return tokens;
 }

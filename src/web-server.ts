@@ -98,6 +98,7 @@ export class WebServer {
         if (path === '/stats') return this.getStats(res);
         if (path === '/scope') return this.getScope(res);
         if (path === '/sessions') return this.getSessions(res);
+        if (path === '/export') return this.exportMemories(res);
         if (path === '/tags') return this.getAllTags(res);
         if (path.startsWith('/tags/')) return this.filterByTag(decodeURIComponent(path.slice(6)), res);
         if (path.startsWith('/links/')) return this.getLinks(path.slice(7), res);
@@ -119,6 +120,8 @@ export class WebServer {
         if (path.startsWith('/untag/')) return this.removeTag(path.slice(7), body, res);
         if (path === '/link') return this.linkMemories(body, res);
         if (path.startsWith('/unlink/')) return this.unlinkMemories(path.slice(8), body, res);
+        if (path === '/maintenance') return this.runMaintenance(res);
+        if (path === '/import') return this.importMemories(body, res);
       }
 
       return this.json(res, { error: 'Not Found' }, 404);
@@ -280,6 +283,25 @@ export class WebServer {
     if (!mem) return this.json(res, { error: 'Memory not found' }, 404);
     const links = this.engine.getLinksForMemory(memoryId);
     this.json(res, { memoryId, links, total: links.length });
+  }
+
+  private runMaintenance(res: import('node:http').ServerResponse) {
+    const result = this.engine.runMaintenanceNow();
+    this.json(res, { ok: true, ...result });
+  }
+
+  private exportMemories(res: import('node:http').ServerResponse) {
+    const data = this.engine.exportMemoriesData();
+    this.json(res, data);
+  }
+
+  private async importMemories(body: Record<string, unknown>, res: import('node:http').ServerResponse) {
+    const list = (body.memories as object[]) ?? (Array.isArray(body) ? body : null);
+    if (!list || !Array.isArray(list)) {
+      return this.json(res, { error: 'Request body must contain a "memories" array or be an array' }, 400);
+    }
+    const imported = await this.engine.importMemoriesData(list);
+    this.json(res, { ok: true, imported, total: list.length });
   }
 
   private linkMemories(body: Record<string, unknown>, res: import('node:http').ServerResponse) {
